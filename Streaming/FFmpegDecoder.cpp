@@ -87,9 +87,10 @@ namespace moonlight_xbox_dx {
 		Utils::Logf(shouldPrefixThisMessage ? "[ffmpeg] %s" : "%s", lineBuffer);
 	}
 
-    void FFMpegDecoder::CompleteInitialization(const std::shared_ptr<DX::DeviceResources>& res, STREAM_CONFIGURATION *config, bool framePacingImmediate) {
+    void FFMpegDecoder::CompleteInitialization(const std::shared_ptr<DX::DeviceResources>& res, STREAM_CONFIGURATION *config, bool framePacingImmediate, int idrInterval) {
 		this->m_deviceResources = res;
 		this->fps = config->fps;
+	    this->idrInterval = idrInterval;
 		Pacer::instance().init(res, config->fps, res->GetRefreshRate(), framePacingImmediate);
 	}
 
@@ -97,12 +98,11 @@ namespace moonlight_xbox_dx {
 		this->videoFormat = videoFormat;
 		this->width = width;
 		this->height = height;
-		this->fps = 60; // correctly set in CompleteInitialization
 
 		this->m_LastFrameNumber = 0;
 		this->ffmpeg_buffer_size = 0;
 		this->m_StreamEpochQpc = 0;
-
+	    this->m_FramesSinceIDR = 0;
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58,10,100)
 		avcodec_register_all();
@@ -282,6 +282,20 @@ namespace moonlight_xbox_dx {
 				av_frame_free(&frame);
 				return DR_NEED_IDR;
 			}
+
+			// Request new IDR frames periodically to mitigate stream corruption.
+		    if (idrInterval > 0) {
+			    if (frame->pict_type == AV_PICTURE_TYPE_I) {
+				    m_FramesSinceIDR = 0;
+			    } else {
+				    m_FramesSinceIDR++;
+			    }
+
+			    if (m_FramesSinceIDR >= (fps * idrInterval)) {
+				    LiRequestIdrFrame();
+				    m_FramesSinceIDR = 0; // avoid requesting multiple IDR frames in a row
+			    }
+		    }
 
 			// Capture a frame timestamp to measuring pacing delay
 			QueryPerformanceCounter(&decodeEnd);

@@ -60,6 +60,7 @@ Concurrency::task<void> moonlight_xbox_dx::ApplicationState::Init()
 					if (a.contains("serverAddress")) h->ServerAddress = Utils::StringFromStdString(a["serverAddress"].get<std::string>());
 					if (a.contains("macaddress")) h->MacAddress = Utils::StringFromStdString(a["macaddress"].get<std::string>());
 					else h->ComputerName = h->LastHostname;
+				    if (a.contains("idr_interval")) h->IdrInterval = a["idr_interval"];
 					this->SavedHosts->Append(h);
 				}
 			}
@@ -121,6 +122,7 @@ Concurrency::task<void> moonlight_xbox_dx::ApplicationState::UpdateFile()
 			hostJson["enable_stats"] = host->EnableStats;
 			hostJson["enable_graphs"] = host->EnableGraphs;
 			hostJson["serverAddress"] = Utils::PlatformStringToStdString(host->ServerAddress);
+			hostJson["idr_interval"] = host->IdrInterval;
 
 			std::string macAddr = Utils::PlatformStringToStdString(host->MacAddress);
 			if (macAddr != "00:00:00:00:00:00" && macAddr != "")
