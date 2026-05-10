@@ -285,7 +285,7 @@ namespace moonlight_xbox_dx {
 
 			// Request new IDR frames periodically to mitigate stream corruption.
 		    if (idrInterval > 0) {
-			    if (frame->pict_type == AV_PICTURE_TYPE_I) {
+			    if (frame->flags == AV_FRAME_FLAG_KEY) {
 				    m_FramesSinceIDR = 0;
 			    } else {
 				    m_FramesSinceIDR++;
