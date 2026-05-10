@@ -87,10 +87,10 @@ namespace moonlight_xbox_dx {
 		Utils::Logf(shouldPrefixThisMessage ? "[ffmpeg] %s" : "%s", lineBuffer);
 	}
 
-    void FFMpegDecoder::CompleteInitialization(const std::shared_ptr<DX::DeviceResources>& res, STREAM_CONFIGURATION *config, bool framePacingImmediate, int idrInterval) {
+	void FFMpegDecoder::CompleteInitialization(const std::shared_ptr<DX::DeviceResources>& res, STREAM_CONFIGURATION *config, bool framePacingImmediate, int idrInterval) {
 		this->m_deviceResources = res;
 		this->fps = config->fps;
-	    this->idrInterval = idrInterval;
+		this->idrInterval = idrInterval;
 		Pacer::instance().init(res, config->fps, res->GetRefreshRate(), framePacingImmediate);
 	}
 
