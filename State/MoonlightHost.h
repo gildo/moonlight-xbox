@@ -290,7 +290,7 @@ namespace moonlight_xbox_dx {
         {
 		    int get() { return this->idrInterval; }
 		    void set(int value) {
-			    this->idrInterval = value;
+			    this->idrInterval = (value <= 0) ? 0 : (value < 2 ? 2 : value);
 			    OnPropertyChanged("IdrInterval");
 		    }
 	    }
