@@ -204,8 +204,10 @@ void HostSettingsPage::FramePacing_SelectionChanged(Platform::Object^ sender, Wi
 
 void HostSettingsPage::EnableIdrIntervalCheckbox_Checked(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e) {
 	IdrIntervalSlider->IsEnabled = true;
+	if (IdrIntervalSlider->Value < 2) {
+		IdrIntervalSlider->Value = 10;
+	}
 	IdrIntervalSlider->Minimum = 2;
-	IdrIntervalSlider->Value = 10;
 }
 
 void HostSettingsPage::EnableIdrIntervalCheckbox_Unchecked(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e) {
