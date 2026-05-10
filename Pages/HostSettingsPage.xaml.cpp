@@ -124,9 +124,11 @@ void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEv
 
 	if (host->IdrInterval > 0) {
 		EnableIdrIntervalCheckbox->IsChecked = true;
+		IdrIntervalSlider->Minimum = 2;
 		IdrIntervalSlider->IsEnabled = true;
 	} else {
 		EnableIdrIntervalCheckbox->IsChecked = false;
+		IdrIntervalSlider->Minimum = 0;
 		IdrIntervalSlider->Value = 0;
 		IdrIntervalSlider->IsEnabled = false;
 	}
