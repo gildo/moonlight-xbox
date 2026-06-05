@@ -1,8 +1,10 @@
 #include "pch.h"
 #include "Stats.h"
+#include "BuildInfo.h"
 #include "Utils.hpp"
 #include "../Plot/ImGuiPlots.h"
 #include "../Streaming/FFMpegDecoder.h"
+#include "../Streaming/Pacer.h"
 
 using namespace moonlight_xbox_dx;
 
@@ -206,6 +208,7 @@ void Stats::addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_ST
 
 void Stats::formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, char* output, size_t length) {
 	FFMpegDecoder& ffmpeg = FFMpegDecoder::instance();
+	Pacer& pacer = Pacer::instance();
 
 	int offset = 0;
 	const char* codecString;
@@ -284,7 +287,11 @@ void Stats::formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, cha
 	if (stats.receivedFps > 0) {
 		ret = snprintf(&output[offset],
 						length - offset,
+						"Moonlight Xbox %s %s [%s]\n"
 						"Video stream: %dx%d %.2f FPS (%s)\n",
+						MOONLIGHT_LAB_BUILD_NAME,
+						MOONLIGHT_LAB_GIT_SHA,
+						MOONLIGHT_LAB_GIT_BRANCH,
 						ffmpeg.width,
 						ffmpeg.height,
 						stats.totalFps,
@@ -302,16 +309,19 @@ void Stats::formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, cha
 		ret = snprintf(&output[offset],
 					   length - offset,
 					   "Bitrate: %.1f Mbps, Peak (%us): %.1f\n"
+					   "Pacing: %s, display %.3f Hz, stream %.3f FPS\n"
 					   "Incoming frame rate from network: %.2f FPS\n"
 					   "Decoding frame rate: %.2f FPS\n"
-					   "Rendering frame rate: %.2f FPS (%s)\n",
+					   "Rendering frame rate: %.2f FPS\n",
 					   avgVideoMbps,
 					   m_bwTracker.GetWindowSeconds(),
 					   peakVideoMbps,
+					   pacer.getPacingImmediate() ? "immediate" : "display-locked",
+					   pacer.getObservedDisplayHz(),
+					   pacer.getObservedStreamFps(),
 					   stats.receivedFps,
 					   stats.decodedFps,
-					   stats.renderedFps,
-					   Pacer::instance().getPacingImmediate() ? "immediate" : "display-locked");
+					   stats.renderedFps);
 		if (ret < 0 || (size_t)ret >= (length - offset)) {
 			Utils::Log("Error: stringifyVideoStats length overflow\n");
 			return;
@@ -361,12 +371,16 @@ void Stats::formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, cha
 					   length - offset,
 					   "Frames dropped by your network connection: %.2f%%\n"
 					   "Frames dropped due to network jitter: %.2f%%\n"
+					   "Missed present deadlines: %u/%u (%.2f%%)\n"
 					   "Average network latency: %s\n"
 					   "Average reassembly/decoding time: %.2f/%.2f ms\n"
 					   "Average frames in queue: %.1f\n"
 					   "Average frame queue/render/present: %.2f/%.2f/%.2f ms\n",
 					   stats.totalFrames ? (double)stats.networkDroppedFrames / stats.totalFrames * 100 : 0.0f,
 					   stats.totalFrames ? (double)stats.pacerDroppedFrames / stats.totalFrames * 100 : 0.0f,
+					   stats.missedDeadlines,
+					   stats.missedDeadlines + stats.hitDeadlines,
+					   (stats.missedDeadlines + stats.hitDeadlines) ? ((double)stats.missedDeadlines / (stats.missedDeadlines + stats.hitDeadlines)) * 100 : 0.0f,
 					   rttString,
 					   stats.decodedFrames ? (double)stats.totalReassemblyTimeUs / 1000.0 / stats.decodedFrames : 0.0f,
 					   stats.decodedFrames ? (double)stats.totalDecodeTime / stats.decodedFrames : 0.0f,

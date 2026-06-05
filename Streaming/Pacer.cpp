@@ -113,6 +113,18 @@ bool Pacer::getPacingImmediate() {
 	return m_FramePacingImmediate.load(std::memory_order_acquire);
 }
 
+double Pacer::getConfiguredRefreshRate() const {
+	return m_RefreshRate;
+}
+
+double Pacer::getObservedDisplayHz() {
+	return m_FrameCadence.displayHz();
+}
+
+double Pacer::getObservedStreamFps() {
+	return m_FrameCadence.streamFps();
+}
+
 void Pacer::setPacingImmediate(bool framePacingImmediate) {
 	m_FramePacingImmediate.store(framePacingImmediate, std::memory_order_release);
 }

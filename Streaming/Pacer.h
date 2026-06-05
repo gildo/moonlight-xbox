@@ -21,6 +21,9 @@ class Pacer {
 	void deinit();
 	void init(const std::shared_ptr<DX::DeviceResources> &res, int maxVideoFps, double refreshRate, bool framePacingImmediate);
 	bool getPacingImmediate();
+	double getConfiguredRefreshRate() const;
+	double getObservedDisplayHz();
+	double getObservedStreamFps();
 	void setPacingImmediate(bool framePacingImmediate);
 	void waitForFrame(double timeoutMs);
 	bool renderOnMainThread(std::shared_ptr<moonlight_xbox_dx::VideoRenderer> &sceneRenderer);
