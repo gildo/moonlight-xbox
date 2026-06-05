@@ -3,7 +3,7 @@ setlocal
 
 echo === Ensure lab package signing certificate ===
 if not exist cert.pfx (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $password = ConvertTo-SecureString -String 'moonlight' -AsPlainText -Force; $cert = New-SelfSignedCertificate -Type Custom -Subject 'CN=CE07B73A-712E-4E05-932B-D08CE2C8A87C' -KeyUsage DigitalSignature -FriendlyName 'Moonlight UWP Pacing Lab' -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}'); Export-PfxCertificate -Cert ('Cert:\CurrentUser\My\' + $cert.Thumbprint) -FilePath cert.pfx -Password $password | Out-Host"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $password = New-Object System.Security.SecureString; 'moonlight'.ToCharArray() | ForEach-Object { $password.AppendChar($_) }; $password.MakeReadOnly(); $cert = New-SelfSignedCertificate -Type Custom -Subject 'CN=CE07B73A-712E-4E05-932B-D08CE2C8A87C' -KeyUsage DigitalSignature -FriendlyName 'Moonlight UWP Pacing Lab' -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}'); Export-PfxCertificate -Cert ('Cert:\CurrentUser\My\' + $cert.Thumbprint) -FilePath cert.pfx -Password $password | Out-Host"
   if errorlevel 1 exit /b 1
 )
 
