@@ -2,6 +2,7 @@
 #include "pch.h"
 // clang-format on
 #include "FrameQueue.h"
+#include "LabPacingConfig.h"
 #include "Utils.hpp"
 #include <algorithm>
 #include <cassert>
@@ -25,7 +26,7 @@ FrameQueue::FrameQueue()
       _tail(0),
       _count(0),
       _droppedLast(false),
-      _maxCapacity(5), // should not exceed swapchain BufferCount
+      _maxCapacity(LabPacingConfig::SwapChainBufferCount()), // should not exceed swapchain BufferCount
       _highWaterMark(3),
       _paused(true) {    // caller will call start()
 

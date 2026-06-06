@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "FFMpegDecoder.h"
+#include "LabPacingConfig.h"
 #include "../Plot/ImGuiPlots.h"
 #include "StatsRenderer.h"
 
@@ -302,6 +303,11 @@ namespace moonlight_xbox_dx {
 		double decodeTimeMs = QpcToMs(decodeEnd.QuadPart - decodeStart.QuadPart);
 		if (decodeEnd.QuadPart > decodeStart.QuadPart) {
 			m_deviceResources->GetStats()->SubmitDecodeMs(decodeTimeMs);
+		}
+
+		const int decoderThrottleMs = LabPacingConfig::DecoderThrottleMs();
+		if (decoderThrottleMs > 0) {
+			SleepUntilQpc(QpcNow() + MsToQpc(static_cast<double>(decoderThrottleMs)));
 		}
 
 		// Not the best way to handle this. BUT IT DOES FIX XBOX ONE TEARING!!!!

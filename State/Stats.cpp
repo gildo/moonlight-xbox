@@ -5,6 +5,8 @@
 #include "Utils.hpp"
 #include "../Plot/ImGuiPlots.h"
 #include "../Streaming/FFMpegDecoder.h"
+#include "../Streaming/FrameQueue.h"
+#include "../Streaming/LabPacingConfig.h"
 #include "../Streaming/Pacer.h"
 
 using namespace moonlight_xbox_dx;
@@ -58,11 +60,16 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 			",\"missed_deadlines\":" + std::to_string(telemetryStats.missedDeadlines) +
 			",\"avg_mbps\":" + std::to_string(m_bwTracker.GetAverageMbps()) +
 			",\"peak_mbps\":" + std::to_string(m_bwTracker.GetPeakMbps()) +
+			",\"queue_depth\":" + std::to_string(FrameQueue::instance().count()) +
+			",\"frame_queue_hwm\":" + std::to_string(FrameQueue::instance().highWaterMark()) +
+			",\"frame_queue_capacity\":" + std::to_string(FrameQueue::instance().maxCapacity()) +
 			",\"avg_queue_depth\":" + std::to_string(m_avgQueueSize) +
 			",\"avg_decode_ms\":" + std::to_string(telemetryStats.decodedFrames ? telemetryStats.totalDecodeTime / telemetryStats.decodedFrames : 0.0) +
+			",\"avg_wait_for_frame_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPreWaitTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
 			",\"avg_render_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalRenderTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
 			",\"avg_wait_before_present_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
 			",\"avg_present_call_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentCallTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
+			"," + LabPacingConfig::TelemetryFields() +
 			",\"rtt_ms\":" + std::to_string(telemetryStats.lastRtt) +
 			",\"rtt_variance_ms\":" + std::to_string(telemetryStats.lastRttVariance));
 

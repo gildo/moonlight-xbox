@@ -4,6 +4,7 @@
 #include <Pages/HostSelectorPage.xaml.h>
 #include <Pages/StreamPage.xaml.h>
 #include <Streaming\FFMpegDecoder.h>
+#include <Streaming\LabPacingConfig.h>
 #include "../Plot/ImGuiPlots.h"
 #include "Common\DirectXHelper.h"
 #include "State\GamepadState.h"
@@ -273,7 +274,10 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 					continue;
 				}
 
-				{
+				if (LabPacingConfig::NoLockAroundPresent()) {
+					m_deviceResources->Present();
+				}
+				else {
 					// lock is required around Present
 					auto guard = FFMpegDecoder::Lock();
 					m_deviceResources->Present();

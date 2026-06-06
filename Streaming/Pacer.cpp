@@ -9,6 +9,7 @@
 #include "../Plot/ImGuiPlots.h"
 #include "FFmpegDecoder.h"
 #include "FrameQueue.h"
+#include "LabPacingConfig.h"
 #include "Utils.hpp"
 
 // Frame Pacing operation
@@ -99,8 +100,11 @@ void Pacer::init(const std::shared_ptr<DX::DeviceResources> &res, int streamFps,
 	m_ewmaVsyncDriftQpc = MsToQpc(0.0001);
 
 	// Start FrameQueue so it's ready to receive new frames
-	FrameQueue::instance().setHighWaterMark(FRAME_QUEUE_HIGH);
+	FrameQueue::instance().setHighWaterMark(LabPacingConfig::FrameQueueHighWaterMark());
 	FrameQueue::instance().start();
+	Utils::Logf("FrameQueue config: capacity=%d hwm=%d\n",
+	            FrameQueue::instance().maxCapacity(),
+	            FrameQueue::instance().highWaterMark());
 
 	if (!m_VsyncThread.joinable()) {
 		m_VsyncThread = std::thread(&Pacer::vsyncHardware, this);

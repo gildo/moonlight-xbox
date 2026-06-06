@@ -8,6 +8,7 @@ extern "C" {
 }
 #include <State\StreamConfiguration.h>
 #include <State\LabLogger.h>
+#include <Streaming\FrameQueue.h>
 #include <Streaming\AudioPlayer.h>
 #include <Utils.hpp>
 #include <atomic>
@@ -427,7 +428,7 @@ void connection_terminated(int status) {
 		",\"last_frame_index\":" + std::to_string(LabLogger::LastFrameNumber()) +
 		",\"bitrate_kbps\":" + std::to_string(snapshot.bitrateKbps) +
 		",\"codec\":" + std::to_string(snapshot.codec) +
-		",\"queue_depth\":" + std::to_string(snapshot.queueDepth) +
+		",\"queue_depth\":" + std::to_string(FrameQueue::instance().count()) +
 		",\"source_file\":" + LabLogger::JsonString(snapshot.sourceFile ? snapshot.sourceFile : "") +
 		",\"source_line\":" + std::to_string(snapshot.sourceLine));
 }

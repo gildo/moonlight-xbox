@@ -355,6 +355,7 @@
     <ClInclude Include="Common\StepTimer.h" />
     <ClInclude Include="Streaming\FrameCadence.h" />
     <ClInclude Include="Streaming\FrameQueue.h" />
+    <ClInclude Include="Streaming\LabPacingConfig.h" />
     <ClInclude Include="Streaming\Pacer.h" />
     <ClInclude Include="Streaming\PacerCompat.h" />
     <ClInclude Include="Streaming\VideoRenderer.h" />
@@ -496,6 +497,7 @@
     <ClCompile Include="Common\DeviceResources.cpp" />
     <ClCompile Include="Streaming\FrameCadence.cpp" />
     <ClCompile Include="Streaming\FrameQueue.cpp" />
+    <ClCompile Include="Streaming\LabPacingConfig.cpp" />
     <ClCompile Include="Streaming\LogRenderer.cpp" />
     <ClCompile Include="Streaming\Pacer.cpp" />
     <ClCompile Include="Streaming\VideoRenderer.cpp" />

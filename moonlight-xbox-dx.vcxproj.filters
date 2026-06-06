@@ -381,6 +381,9 @@
     <ClCompile Include="Streaming\FrameQueue.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Streaming\LabPacingConfig.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Streaming\FrameCadence.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -480,6 +483,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Streaming\FrameQueue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Streaming\LabPacingConfig.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Streaming\FrameCadence.h">

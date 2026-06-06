@@ -5,6 +5,7 @@
 #include <winrt/Windows.UI.Core.h>
 #include <Pages/StreamPage.xaml.h>
 #include <Streaming/FFmpegDecoder.h>
+#include <Streaming/LabPacingConfig.h>
 #include <Plot/ImGuiPlots.h>
 
 using namespace moonlight_xbox_dx;
@@ -250,7 +251,7 @@ void DX::DeviceResources::CreateWindowSizeDependentResources()
 		swapChainDesc.SampleDesc.Quality = 0;
 		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 		//Check moonlight-stream/moonlight-qt/app/streaming/video/ffmpeg-renderers/d3d11va.cpp for rationale
-		swapChainDesc.BufferCount = 5;
+		swapChainDesc.BufferCount = LabPacingConfig::SwapChainBufferCount();
 		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 		swapChainDesc.Flags = 0;
 		swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
@@ -286,8 +287,8 @@ void DX::DeviceResources::CreateWindowSizeDependentResources()
 			)
 		);
 
-		Utils::Logf("CreateSwapChainForComposition(%d x %d)\n",
-			lround(m_d3dRenderTargetSize.Width), lround(m_d3dRenderTargetSize.Height));
+		Utils::Logf("CreateSwapChainForComposition(%d x %d), buffers=%d\n",
+			lround(m_d3dRenderTargetSize.Width), lround(m_d3dRenderTargetSize.Height), swapChainDesc.BufferCount);
 
 		DX::ThrowIfFailed(
 			swapChain.As<IDXGISwapChain4>(&m_swapChain)
@@ -525,7 +526,7 @@ void DX::DeviceResources::Trim()
 // Present the contents of the swap chain to the screen.
 void DX::DeviceResources::Present()
 {
-	HRESULT hr = m_swapChain->Present(0, 0);
+	HRESULT hr = m_swapChain->Present(LabPacingConfig::PresentSyncInterval(), 0);
 
 	// If the device was removed either by a disconnection or a driver upgrade, we
 	// must recreate all device resources.
