@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ApplicationState.h"
+#include "LabLogger.h"
 #include <Utils.hpp>
 #include <nlohmann/json.hpp>
 
@@ -19,6 +20,7 @@ Concurrency::task<void> moonlight_xbox_dx::ApplicationState::Init()
 		return FileIO::ReadTextAsync(file);
 		}).then([this](Concurrency::task<Platform::String^> jsonTask) {
 			this->FirstTime = true;
+			bool migratedXboxOneCodec = false;
 			Platform::String^ jsonFile = jsonTask.get();
 			if (jsonFile != nullptr && jsonFile->Length() > 0) {
 				nlohmann::json stateJson = nlohmann::json::parse(jsonFile);
@@ -40,6 +42,13 @@ Concurrency::task<void> moonlight_xbox_dx::ApplicationState::Init()
 					if (a.contains("fps"))h->FPS = a["fps"];
 					if (a.contains("audioConfig"))h->AudioConfig = Utils::StringFromStdString(a["audioConfig"].get<std::string>());
 					if (a.contains("videoCodec"))h->VideoCodec = Utils::StringFromStdString(a["videoCodec"].get<std::string>());
+					if (IsXboxOne() && h->VideoCodec != "H.264") {
+						LabLogger::Event("xbox_one_codec_forced_h264",
+							"\"host\":" + LabLogger::JsonString(Utils::PlatformStringToStdString(h->LastHostname)) +
+							",\"previous_codec\":" + LabLogger::JsonString(Utils::PlatformStringToStdString(h->VideoCodec)));
+						h->VideoCodec = "H.264";
+						migratedXboxOneCodec = true;
+					}
 					if (a.contains("framePacing"))h->FramePacing = Utils::StringFromStdString(a["framePacing"].get<std::string>());
 					if (a.contains("autoStartID"))h->AutostartID = a["autoStartID"];
 					if (a.contains("computername")) h->ComputerName = Utils::StringFromStdString(a["computername"].get<std::string>());
@@ -53,6 +62,9 @@ Concurrency::task<void> moonlight_xbox_dx::ApplicationState::Init()
 					else h->ComputerName = h->LastHostname;
 					this->SavedHosts->Append(h);
 				}
+			}
+			if (migratedXboxOneCodec) {
+				UpdateFile();
 			}
 		});
 }
