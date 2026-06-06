@@ -23,6 +23,7 @@ namespace {
 	bool g_waitableSwapChain = false;
 	int g_maxFrameLatency = 1;
 	int g_textureRingSize = 1;
+	bool g_loadedJsonConfig = false;
 
 	int ReadIntSetting(const wchar_t* key, int fallback) {
 		try {
@@ -54,11 +55,11 @@ namespace {
 		return std::wstring(folder->Data()) + L"\\moonlight-lab-pacing.json";
 	}
 
-	void ReadJsonConfig() {
+	bool ReadJsonConfig() {
 		try {
 			std::ifstream file(Utils::WideToNarrowString(LocalConfigPath()));
 			if (!file) {
-				return;
+				return false;
 			}
 
 			nlohmann::json config = nlohmann::json::parse(file, nullptr, true, true);
@@ -74,6 +75,7 @@ namespace {
 			g_maxFrameLatency = config.value("max_frame_latency", g_maxFrameLatency);
 			g_textureRingSize = config.value("texture_ring_size", g_textureRingSize);
 			Utils::Logf("Loaded lab pacing config from LocalState moonlight-lab-pacing.json\n");
+			return true;
 		}
 		catch (const std::exception& e) {
 			Utils::Logf("Failed to load moonlight-lab-pacing.json: %s\n", e.what());
@@ -83,10 +85,69 @@ namespace {
 			Utils::Logf("Failed to load moonlight-lab-pacing.json\n");
 			LabLogger::Event("lab_pacing_config_error", "\"error\":\"json_load_failed\"");
 		}
+		return false;
+	}
+
+	std::wstring LocalVariantIndexPath() {
+		auto folder = Windows::Storage::ApplicationData::Current->LocalFolder->Path;
+		return std::wstring(folder->Data()) + L"\\moonlight-lab-variant-index.txt";
+	}
+
+	void SetVariant(const char* label,
+	                int presentSyncInterval,
+	                bool manualPresentWait,
+	                double presentLeadMs,
+	                int swapchainBuffers,
+	                int textureRingSize,
+	                bool waitableSwapChain) {
+		g_variantLabel = label;
+		g_presentSyncInterval = presentSyncInterval;
+		g_manualPresentWait = manualPresentWait;
+		g_presentLeadMs = presentLeadMs;
+		g_swapchainBuffers = swapchainBuffers;
+		g_frameQueueHwm = 1;
+		g_textureRingSize = textureRingSize;
+		g_waitableSwapChain = waitableSwapChain;
+		g_maxFrameLatency = 1;
+	}
+
+	void ApplyAutoVariant() {
+		int index = 0;
+		try {
+			std::ifstream in(Utils::WideToNarrowString(LocalVariantIndexPath()));
+			if (in) {
+				in >> index;
+			}
+		}
+		catch (...) {
+			index = 0;
+		}
+
+		switch (((index % 7) + 7) % 7) {
+		case 0: SetVariant("A-current", 0, true, 0.0, 5, 1, false); break;
+		case 1: SetVariant("B-lead2", 0, true, 2.0, 5, 1, false); break;
+		case 2: SetVariant("C-sync1-nowait", 1, false, 0.0, 5, 1, false); break;
+		case 3: SetVariant("D-sync1-lead2", 1, true, 2.0, 5, 1, false); break;
+		case 4: SetVariant("E-best-buffers3", 0, true, 2.0, 3, 1, false); break;
+		case 5: SetVariant("F-best-ring3", 0, true, 2.0, 3, 3, false); break;
+		case 6: SetVariant("G-waitable", 1, false, 0.0, 3, 3, true); break;
+		}
+
+		try {
+			std::ofstream out(Utils::WideToNarrowString(LocalVariantIndexPath()), std::ios::trunc);
+			out << (index + 1) << "\n";
+		}
+		catch (...) {
+			Utils::Logf("Failed to write moonlight-lab-variant-index.txt\n");
+		}
+		Utils::Logf("Auto-selected lab pacing variant index=%d label=%s\n", index, g_variantLabel.c_str());
 	}
 
 	void InitOnce() {
-		ReadJsonConfig();
+		g_loadedJsonConfig = ReadJsonConfig();
+		if (!g_loadedJsonConfig) {
+			ApplyAutoVariant();
+		}
 
 		g_presentSyncInterval = std::clamp(ReadIntSetting(L"xbox_lab_present_interval", g_presentSyncInterval), 0, 1);
 		g_manualPresentWait = ReadIntSetting(L"xbox_lab_manual_present_wait", g_manualPresentWait ? 1 : 0) != 0;
@@ -186,5 +247,6 @@ std::string LabPacingConfig::TelemetryFields() {
 		",\"no_lock_present\":" + std::to_string(g_noLockAroundPresent ? 1 : 0) +
 		",\"waitable_swapchain\":" + std::to_string(g_waitableSwapChain ? 1 : 0) +
 		",\"max_frame_latency\":" + std::to_string(g_maxFrameLatency) +
-		",\"texture_ring_size\":" + std::to_string(g_textureRingSize);
+		",\"texture_ring_size\":" + std::to_string(g_textureRingSize) +
+		",\"config_source\":\"" + (g_loadedJsonConfig ? std::string("json") : std::string("auto-cycle")) + "\"";
 }
