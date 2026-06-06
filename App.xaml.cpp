@@ -5,6 +5,7 @@
 
 #include "pch.h"
 #include <Utils.hpp>
+#include "State/LabLogger.h"
 #include "MoonlightWelcome.xaml.h"
 
 using namespace moonlight_xbox_dx;
@@ -51,6 +52,7 @@ void App::OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEvent
 // 	}
 // #endif
 	moonlight_xbox_dx::Utils::Log("Hello from Moonlight!\n");
+	moonlight_xbox_dx::LabLogger::Initialize();
 	auto rootFrame = dynamic_cast<Frame^>(Window::Current->Content);
 
 	// Do not repeat app initialization when the Window already has content,
@@ -129,4 +131,3 @@ void App::OnNavigationFailed(Platform::Object ^sender, Windows::UI::Xaml::Naviga
 	dialog->ShowAsync();
 	//throw ref new FailureException("Failed to load Page " + e->SourcePageType.Name);
 }
-

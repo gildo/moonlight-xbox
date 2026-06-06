@@ -6,6 +6,7 @@
 
 namespace moonlight_xbox_dx {
 namespace LabLogger {
+	void Initialize();
 	void Event(const char* name, const std::string& fields = std::string());
 	void Telemetry(const std::string& fields);
 	void NoteFrame(uint32_t frameNumber);

@@ -16,6 +16,8 @@ namespace {
 	std::atomic<uint64_t> g_lastVideoMs{0};
 	std::atomic<uint64_t> g_lastAudioMs{0};
 	std::atomic<uint64_t> g_lastControlMs{0};
+	std::atomic<bool> g_initialized{false};
+	std::atomic<uint32_t> g_storageFailureCount{0};
 
 	std::string LocalStatePath(const char* fileName) {
 		try {
@@ -30,17 +32,68 @@ namespace {
 		}
 	}
 
-	void AppendLine(const char* fileName, const std::string& line) {
+	bool AppendLineCrt(const char* fileName, const std::string& line) {
 		std::lock_guard<std::mutex> lock(g_fileMutex);
 		std::string path = LocalStatePath(fileName);
 		FILE* f = nullptr;
 		if (fopen_s(&f, path.c_str(), "ab") != 0 || f == nullptr) {
-			return;
+			return false;
 		}
 		fwrite(line.data(), 1, line.size(), f);
 		fwrite("\n", 1, 1, f);
 		fclose(f);
+		return true;
 	}
+
+	void AppendLineStorage(const char* fileName, const std::string& line) {
+		try {
+			auto folder = Windows::Storage::ApplicationData::Current->LocalFolder;
+			auto name = ref new Platform::String(Utils::NarrowToWideString(fileName ? fileName : "moonlight-lab-events.ndjson").c_str());
+			auto text = ref new Platform::String(Utils::NarrowToWideString(line + "\n").c_str());
+
+			concurrency::create_task(folder->CreateFileAsync(name, Windows::Storage::CreationCollisionOption::OpenIfExists))
+				.then([text](Windows::Storage::StorageFile^ file) {
+					return Windows::Storage::FileIO::AppendTextAsync(file, text);
+				})
+				.then([](concurrency::task<void> task) {
+					try {
+						task.get();
+					}
+					catch (Platform::Exception^ ex) {
+						if (g_storageFailureCount.fetch_add(1, std::memory_order_relaxed) < 3) {
+							Utils::Logf("[LabLogger] Storage append failed: 0x%08X\n", ex->HResult);
+						}
+					}
+				});
+		}
+		catch (Platform::Exception^ ex) {
+			if (g_storageFailureCount.fetch_add(1, std::memory_order_relaxed) < 3) {
+				Utils::Logf("[LabLogger] Storage append setup failed: 0x%08X\n", ex->HResult);
+			}
+		}
+		catch (...) {
+			if (g_storageFailureCount.fetch_add(1, std::memory_order_relaxed) < 3) {
+				Utils::Log("[LabLogger] Storage append setup failed with unknown exception\n");
+			}
+		}
+	}
+
+	void AppendLine(const char* fileName, const std::string& line) {
+		if (AppendLineCrt(fileName, line)) {
+			return;
+		}
+		AppendLineStorage(fileName, line);
+	}
+}
+
+void LabLogger::Initialize() {
+	bool expected = false;
+	if (!g_initialized.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+		return;
+	}
+
+	Event("app_launch",
+		"\"local_state_path\":" + JsonString(LocalStatePath("")));
 }
 
 uint64_t LabLogger::NowMs() {
