@@ -23,6 +23,7 @@ namespace moonlight_xbox_dx
 		Windows::Foundation::EventRegistrationToken m_back_cookie;
 		std::atomic<bool> continueAppFetch{ false };
 		std::atomic<bool> wasConnected{ false };
+		std::atomic<bool> disconnectDialogShown{ false };
 	protected:
 		virtual void OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) override;
 		virtual void OnNavigatedFrom(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) override;

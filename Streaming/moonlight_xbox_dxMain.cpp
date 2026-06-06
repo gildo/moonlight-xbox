@@ -7,6 +7,7 @@
 #include "../Plot/ImGuiPlots.h"
 #include "Common\DirectXHelper.h"
 #include "State\GamepadState.h"
+#include "State\LabLogger.h"
 #include "Utils.hpp"
 
 #include <algorithm>
@@ -204,6 +205,7 @@ moonlight_xbox_dxMain::moonlight_xbox_dxMain(const std::shared_ptr<DX::DeviceRes
 moonlight_xbox_dxMain::~moonlight_xbox_dxMain() {
 	// Deregister device notification
 	m_deviceResources->RegisterDeviceNotify(nullptr);
+	StopRenderLoop();
 }
 
 void moonlight_xbox_dxMain::CreateDeviceDependentResources() {
@@ -228,7 +230,7 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 			Utils::Logf("Failed to set render thread priority: %d\n", GetLastError());
 		}
 
-		int64_t t0 = 0, t1 = 0, t2 = 0, t3 = 0;
+		int64_t t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
 		int64_t lastFramePts = 0, lastPresentTime = 0;
 		double frametimeMs = 0.0, hostFrametimeMs = 0.0;
 		const double bufferMs = 1.5;   // safety wait time to avoid missing deadline
@@ -276,6 +278,7 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 					auto guard = FFMpegDecoder::Lock();
 					m_deviceResources->Present();
 				}
+				t4 = QpcNow();
 
 				// Graph frametime only for new frames
 				bool isRepeatFrame = true;
@@ -283,10 +286,10 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				if (currentFramePts != lastFramePts) {
 					if (lastPresentTime > 0) {
 						hostFrametimeMs = ((double)currentFramePts - lastFramePts) / 90.0;
-						frametimeMs = QpcToMs(t3 - lastPresentTime);
+						frametimeMs = QpcToMs(t4 - lastPresentTime);
 						ImGuiPlots::instance().observeFloat(PLOT_FRAMETIME, static_cast<float>(frametimeMs));
 					}
-					lastPresentTime = t3;
+					lastPresentTime = t4;
 					lastFramePts = currentFramePts;
 					isRepeatFrame = false;
 				}
@@ -303,10 +306,11 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				// Track high-level render loop stats
 				double preWaitMs = QpcToMs(t1 - t0);
 				double beforePresentMs = QpcToMs(t3 - t2);
-				m_deviceResources->GetStats()->SubmitRenderStats(preWaitMs, renderMs, beforePresentMs, hitDeadline);
+				double presentCallMs = QpcToMs(t4 - t3);
+				m_deviceResources->GetStats()->SubmitRenderStats(preWaitMs, renderMs, beforePresentMs, presentCallMs, hitDeadline);
 
-				FQLog("render loop %.3fms %s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms PreWait %.3fms (max %.3fms) + Render %.3fms (avg %.3f) + Present %.3fms)\n",
-				      QpcToMs(t3 - t0),                             // loop time
+				FQLog("render loop %.3fms %s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms PreWait %.3fms (max %.3fms) + Render %.3fms (avg %.3f) + WaitPresent %.3fms + Present %.3fms)\n",
+				      QpcToMs(t4 - t0),                             // loop time
 				      hitDeadline ? " " : "M",                      // missed deadline?
 				      isRepeatFrame ? "R" : " ",                    // repeated frame?
 				      preWaitMs > maxWaitMs + bufferMs ? "W" : " ", // we waited too long for a frame (including buffer)
@@ -318,12 +322,18 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				      maxWaitMs,                                    // max wait allowed this frame
 				      renderMs,                                     // render time this frame
 				      ewmaRenderMs,                                 // average of render time used to control prewait
-				      beforePresentMs);                             // wait time to align present to vblank
+				      beforePresentMs,                              // wait time to align present to vblank
+				      presentCallMs);                               // Present() call time
 			}
 		}
 
-		// we've lost the connection, clean up
-		StopRenderLoop(); // also stops input
+		if (!TryBeginTeardown()) {
+			return;
+		}
+
+		LabLogger::Event("stream_teardown_started",
+			"\"termination_status\":" + std::to_string(moonlightClient->GetLastTerminationStatus()));
+		StopRenderLoop();
 		Disconnect();
 
 		DISPATCH_UI([this]() {
@@ -363,8 +373,17 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 }
 
 void moonlight_xbox_dxMain::StopRenderLoop() {
-	m_renderLoopWorker->Cancel();
-	m_inputLoopWorker->Cancel();
+	if (m_renderLoopWorker != nullptr && m_renderLoopWorker->Status == AsyncStatus::Started) {
+		m_renderLoopWorker->Cancel();
+	}
+	if (m_inputLoopWorker != nullptr && m_inputLoopWorker->Status == AsyncStatus::Started) {
+		m_inputLoopWorker->Cancel();
+	}
+}
+
+bool moonlight_xbox_dxMain::TryBeginTeardown() {
+	bool expected = false;
+	return m_teardownStarted.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
 }
 
 // Updates the application state once per frame.
@@ -740,7 +759,9 @@ void moonlight_xbox_dxMain::SetFlyoutOpened(bool value) {
 
 void moonlight_xbox_dxMain::Disconnect() {
 	moonlightClient->StopStreaming();
-	m_sceneRenderer->Stop();
+	if (m_sceneRenderer) {
+		m_sceneRenderer->Stop();
+	}
 }
 
 void moonlight_xbox_dxMain::CloseApp() {

@@ -4,6 +4,7 @@
 #include "StatsRenderer.h"
 
 #include <Common\DirectXHelper.h>
+#include <State\LabLogger.h>
 #include <d3d11_1.h>
 #include "Utils.hpp"
 #include "moonlight_xbox_dxMain.h"
@@ -236,6 +237,7 @@ namespace moonlight_xbox_dx {
 			droppedFramesNetwork = decodeUnit->frameNumber - (m_LastFrameNumber + 1);
 		}
 		m_LastFrameNumber = decodeUnit->frameNumber;
+		LabLogger::NoteFrame(decodeUnit->frameNumber);
 
 		if (!decodeUnit->rtpTimestamp) {
 			// Estimate for hosts that don't send timestamps (e.g. Wolf)

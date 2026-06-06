@@ -23,6 +23,8 @@ class MoonlightClient {
 	int Connect(const char *hostname);
 	bool IsConnectionTerminated();
 	void SetConnectionTerminated();
+	void SetConnectionTerminatedByUser();
+	int GetLastTerminationStatus();
 	bool IsHDR();
 	bool IsPaired();
 	bool IsRGBFull();

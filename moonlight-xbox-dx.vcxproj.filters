@@ -39,6 +39,9 @@
     <ClCompile Include="State\MoonlightClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="State\LabLogger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="State\StreamConfiguration.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -387,6 +390,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="State\MoonlightClient.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="State\LabLogger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="State\StreamConfiguration.h">

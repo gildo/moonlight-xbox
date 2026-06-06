@@ -221,7 +221,7 @@ void StreamPage::disonnectButton_Click(Platform::Object^ sender, Windows::UI::Xa
 	Windows::UI::Core::CoreWindow::GetForCurrentThread()->KeyUp -= keyUpHandler;
 
 	// trigger the server disconnected flow
-	this->m_main->moonlightClient->SetConnectionTerminated();
+	this->m_main->moonlightClient->SetConnectionTerminatedByUser();
 }
 
 void StreamPage::OnKeyDown(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ e)
@@ -257,7 +257,7 @@ void StreamPage::disconnectAndCloseButton_Click(Platform::Object ^ sender, Windo
 	Windows::UI::Core::CoreWindow::GetForCurrentThread()->KeyUp -= keyUpHandler;
 	if (this->m_main) {
 		// trigger the server disconnected flow which will cleanly exit the loop and call StopRenderLoop()
-		this->m_main->moonlightClient->SetConnectionTerminated();
+		this->m_main->moonlightClient->SetConnectionTerminatedByUser();
 	}
 
 	auto that = this;
@@ -349,4 +349,3 @@ bool StreamPage::ShouldRefreshGamepads() {
 void StreamPage::RequestRefreshGamepads() {
 	m_refreshGamepads.store(true, std::memory_order_release);
 }
-

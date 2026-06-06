@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Stats.h"
 #include "BuildInfo.h"
+#include "LabLogger.h"
 #include "Utils.hpp"
 #include "../Plot/ImGuiPlots.h"
 #include "../Streaming/FFMpegDecoder.h"
@@ -44,6 +45,26 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 
 		// Accumulate these values into the global stats
 		addVideoStats(timer, m_ActiveWndVideoStats, m_GlobalVideoStats);
+
+		VIDEO_STATS telemetryStats = {};
+		addVideoStats(timer, m_ActiveWndVideoStats, telemetryStats);
+		LabLogger::Telemetry(
+			"\"received_frames\":" + std::to_string(telemetryStats.receivedFrames) +
+			",\"decoded_frames\":" + std::to_string(telemetryStats.decodedFrames) +
+			",\"rendered_frames\":" + std::to_string(telemetryStats.renderedFrames) +
+			",\"network_dropped_frames\":" + std::to_string(telemetryStats.networkDroppedFrames) +
+			",\"pacer_dropped_frames\":" + std::to_string(telemetryStats.pacerDroppedFrames) +
+			",\"hit_deadlines\":" + std::to_string(telemetryStats.hitDeadlines) +
+			",\"missed_deadlines\":" + std::to_string(telemetryStats.missedDeadlines) +
+			",\"avg_mbps\":" + std::to_string(m_bwTracker.GetAverageMbps()) +
+			",\"peak_mbps\":" + std::to_string(m_bwTracker.GetPeakMbps()) +
+			",\"avg_queue_depth\":" + std::to_string(m_avgQueueSize) +
+			",\"avg_decode_ms\":" + std::to_string(telemetryStats.decodedFrames ? telemetryStats.totalDecodeTime / telemetryStats.decodedFrames : 0.0) +
+			",\"avg_render_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalRenderTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
+			",\"avg_wait_before_present_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
+			",\"avg_present_call_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentCallTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
+			",\"rtt_ms\":" + std::to_string(telemetryStats.lastRtt) +
+			",\"rtt_variance_ms\":" + std::to_string(telemetryStats.lastRttVariance));
 
 		// Move this window into the last window slot and clear it for next window
 		memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(VIDEO_STATS));
@@ -135,7 +156,7 @@ void Stats::SubmitPresentPacing(double presentDisplayMs) {
 }
 
 // High-level render loop timings
-void Stats::SubmitRenderStats(double preWaitTimeMs, double renderTimeMs, double presentTimeMs, bool hitDeadline) {
+void Stats::SubmitRenderStats(double preWaitTimeMs, double renderTimeMs, double waitBeforePresentMs, double presentCallMs, bool hitDeadline) {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_ActiveWndVideoStats.totalRenderTimeUs += static_cast<uint64_t>(renderTimeMs * 1000);
 	m_ActiveWndVideoStats.renderedFrames++;
@@ -148,7 +169,8 @@ void Stats::SubmitRenderStats(double preWaitTimeMs, double renderTimeMs, double 
 
 	// Only shown in debug builds
 	m_ActiveWndVideoStats.totalPreWaitTimeUs += static_cast<uint64_t>(preWaitTimeMs * 1000);
-	m_ActiveWndVideoStats.totalPresentTimeUs += static_cast<uint64_t>(presentTimeMs * 1000);
+	m_ActiveWndVideoStats.totalPresentTimeUs += static_cast<uint64_t>(waitBeforePresentMs * 1000);
+	m_ActiveWndVideoStats.totalPresentCallTimeUs += static_cast<uint64_t>(presentCallMs * 1000);
 }
 
 /// private methods
@@ -168,6 +190,7 @@ void Stats::addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_ST
 	dst.totalRenderTimeUs += src.totalRenderTimeUs;
 	dst.totalPreWaitTimeUs += src.totalPreWaitTimeUs;
 	dst.totalPresentTimeUs += src.totalPresentTimeUs;
+	dst.totalPresentCallTimeUs += src.totalPresentCallTimeUs;
 	dst.totalPresentDisplayMs += src.totalPresentDisplayMs;
 
 	if (dst.minHostProcessingLatency == 0) {

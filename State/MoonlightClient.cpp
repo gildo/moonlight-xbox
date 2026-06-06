@@ -7,6 +7,7 @@ extern "C" {
 #include <libgamestream/errors.h>
 }
 #include <State\StreamConfiguration.h>
+#include <State\LabLogger.h>
 #include <Streaming\AudioPlayer.h>
 #include <Utils.hpp>
 #include <atomic>
@@ -20,6 +21,11 @@ using namespace Windows::Graphics::Display;
 using namespace Windows::Graphics::Display::Core;
 
 std::atomic<bool> g_connectionTerminated{false};
+std::atomic<int> g_lastTerminationStatus{0};
+
+static std::string SafePlatformStringToStdString(Platform::String^ value) {
+	return value == nullptr ? std::string() : Utils::PlatformStringToStdString(value);
+}
 
 void log_message(const char* fmt, ...);
 void connection_started();
@@ -200,6 +206,16 @@ void MoonlightClient::StopApp() {
 }
 int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, StreamConfiguration^ sConfig) {
 	g_connectionTerminated.store(false, std::memory_order_release);
+	g_lastTerminationStatus.store(0, std::memory_order_release);
+	LabLogger::Event("stream_start_requested",
+		"\"host\":" + LabLogger::JsonString(SafePlatformStringToStdString(sConfig->hostname)) +
+		",\"app_id\":" + std::to_string(sConfig->appID) +
+		",\"app_name\":" + LabLogger::JsonString(SafePlatformStringToStdString(sConfig->appName)) +
+		",\"width\":" + std::to_string(sConfig->width) +
+		",\"height\":" + std::to_string(sConfig->height) +
+		",\"fps\":" + std::to_string(sConfig->FPS) +
+		",\"bitrate_kbps\":" + std::to_string(sConfig->bitrate) +
+		",\"codec\":" + LabLogger::JsonString(SafePlatformStringToStdString(sConfig->videoCodec)));
 
 	//Thanks to https://stackoverflow.com/questions/11746146/how-to-convert-platformstring-to-char
 	std::wstring fooW(sConfig->hostname->Begin());
@@ -325,6 +341,7 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 	Utils::Log(message);
 
 	if (k != 0) {
+		LabLogger::Event("stream_start_failed", "\"status\":" + std::to_string(k));
 		this->OnFailed(0, k, "Connection failed");
 	}
 
@@ -332,6 +349,7 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 }
 
 void MoonlightClient::StopStreaming() {
+	LabLogger::Event("stream_stop_requested");
 	LiStopConnection();
 }
 
@@ -357,6 +375,7 @@ void connection_started() {
 	char message[2048];
 	sprintf(message, "Connection Started\n");
 	Utils::Log(message);
+	LabLogger::Event("connection_started");
 	if (connectedInstance->OnCompleted != nullptr) {
 		connectedInstance->OnCompleted();
 	}
@@ -367,12 +386,16 @@ void connection_status_update(int status) {
 	auto stageName = LiGetFormattedStageName(status);
 	sprintf(message, "Stage %d: '%s' - Started\n", status, LiGetFormattedStageName(status));
 	Utils::Log(message);
+	LabLogger::Event("stage_started", "\"stage\":" + std::to_string(status) +
+		",\"stage_name\":" + LabLogger::JsonString(stageName ? stageName : ""));
 }
 
 void connection_status_completed(int status) {
 	char message[4096];
 	sprintf(message, "Stage %d: '%s' - Completed\n", status, LiGetFormattedStageName(status));
 	Utils::Log(message);
+	LabLogger::Event("stage_completed", "\"stage\":" + std::to_string(status) +
+		",\"stage_name\":" + LabLogger::JsonString(LiGetFormattedStageName(status)));
 	if (connectedInstance->OnStatusUpdate != nullptr) {
 		connectedInstance->OnStatusUpdate(status);
 	}
@@ -389,7 +412,24 @@ void connection_terminated(int status) {
 	sprintf(message, "Connection terminated with status %d\n", status);
 	Utils::Log(message);
 
+	g_lastTerminationStatus.store(status, std::memory_order_release);
 	g_connectionTerminated.store(true, std::memory_order_release);
+
+	TERMINATION_SNAPSHOT snapshot;
+	LiGetLastTerminationSnapshot(&snapshot);
+	LabLogger::Event("connection_terminated",
+		"\"status\":" + std::to_string(status) +
+		",\"origin\":" + std::to_string((int)snapshot.origin) +
+		",\"socket_error\":" + std::to_string(snapshot.socketError) +
+		",\"last_video_ms\":" + std::to_string(LabLogger::LastVideoMs()) +
+		",\"last_audio_ms\":" + std::to_string(LabLogger::LastAudioMs()) +
+		",\"last_control_ms\":" + std::to_string(LabLogger::LastControlMs()) +
+		",\"last_frame_index\":" + std::to_string(LabLogger::LastFrameNumber()) +
+		",\"bitrate_kbps\":" + std::to_string(snapshot.bitrateKbps) +
+		",\"codec\":" + std::to_string(snapshot.codec) +
+		",\"queue_depth\":" + std::to_string(snapshot.queueDepth) +
+		",\"source_file\":" + LabLogger::JsonString(snapshot.sourceFile ? snapshot.sourceFile : "") +
+		",\"source_line\":" + std::to_string(snapshot.sourceLine));
 }
 
 void stage_failed(int stage, int err) {
@@ -400,6 +440,9 @@ void stage_failed(int stage, int err) {
 	LiStringifyPortFlags(portFlags, ", ", failingPorts, sizeof(failingPorts));
 	sprintf(message, "Stage %d: '%s' - Failed with error: %d.\n", stage, LiGetFormattedStageName(stage), err, failingPorts);
 	Utils::Log(message);
+	LabLogger::Event("stage_failed", "\"stage\":" + std::to_string(stage) +
+		",\"stage_name\":" + LabLogger::JsonString(LiGetFormattedStageName(stage)) +
+		",\"error\":" + std::to_string(err));
 	if (connectedInstance->OnFailed != nullptr) {
 		connectedInstance->OnFailed(stage, err, message);
 	}
@@ -443,6 +486,16 @@ bool MoonlightClient::IsConnectionTerminated() {
 
 void MoonlightClient::SetConnectionTerminated() {
 	g_connectionTerminated.store(true, std::memory_order_release);
+}
+
+void MoonlightClient::SetConnectionTerminatedByUser() {
+	g_lastTerminationStatus.store(ML_ERROR_GRACEFUL_TERMINATION, std::memory_order_release);
+	LabLogger::Event("user_stop_requested");
+	g_connectionTerminated.store(true, std::memory_order_release);
+}
+
+int MoonlightClient::GetLastTerminationStatus() {
+	return g_lastTerminationStatus.load(std::memory_order_acquire);
 }
 
 bool MoonlightClient::IsHDR() {

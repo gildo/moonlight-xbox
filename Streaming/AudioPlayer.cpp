@@ -1,5 +1,6 @@
 #include "pch.h"
 #include <opus/opus_multistream.h>
+#include <State\LabLogger.h>
 #include <State\MoonlightClient.h>
 #include <Streaming\AudioPlayer.h>
 #include <Utils.hpp>
@@ -38,6 +39,7 @@ namespace moonlight_xbox_dx {
 		instance = NULL;
 	}
 	void audioSubmitCallback(char* sampleData, int sampleLength) {
+		LabLogger::NoteAudioPacket();
 		instance->SubmitDU(sampleData,sampleLength);
 	}
 
