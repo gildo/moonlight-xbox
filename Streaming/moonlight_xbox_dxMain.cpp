@@ -241,6 +241,8 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 
 		// Calculate the updated frame and render once per vertical blanking interval.
 		while (action->Status == AsyncStatus::Started && !moonlightClient->IsConnectionTerminated()) {
+			m_deviceResources->WaitForFrameLatency();
+
 			// Get overall deadline we must hit by the Present for this frame
 			int64_t deadline = Pacer::instance().getNextVBlankQpc(&t0);
 
@@ -261,9 +263,12 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 					t2 = QpcNow();
 				}
 
-				// Whether we rendered a new frame or not, wait until vblank for pacing
-				// This is out of the lock and won't block the decoder
-				bool hitDeadline = Pacer::instance().waitBeforePresent(deadline);
+				// Whether we rendered a new frame or not, optionally wait near vblank for pacing.
+				// This is out of the lock and won't block the decoder.
+				int64_t presentTarget = deadline - MsToQpc(LabPacingConfig::PresentLeadMs());
+				if (LabPacingConfig::ManualPresentWait()) {
+					Pacer::instance().waitBeforePresent(presentTarget);
+				}
 				t3 = QpcNow();
 
 				if (!rendered) {
@@ -274,15 +279,21 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 					continue;
 				}
 
+				int64_t tLockStart = QpcNow();
+				int64_t tBeforePresent = tLockStart;
 				if (LabPacingConfig::NoLockAroundPresent()) {
 					m_deviceResources->Present();
 				}
 				else {
 					// lock is required around Present
 					auto guard = FFMpegDecoder::Lock();
+					tBeforePresent = QpcNow();
 					m_deviceResources->Present();
 				}
 				t4 = QpcNow();
+				if (LabPacingConfig::NoLockAroundPresent()) {
+					tBeforePresent = tLockStart;
+				}
 
 				// Graph frametime only for new frames
 				bool isRepeatFrame = true;
@@ -304,18 +315,37 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				double renderMs = QpcToMs(t2 - t1);
 				double clampedRenderMs = std::clamp(renderMs, 0.0, QpcToMs(deadline - t0));
 				double alpha = (clampedRenderMs > ewmaRenderMs) ? alphaUp : alphaDown;
-				if (!hitDeadline) alpha *= 2.0;
+				bool presentDeadlineHit = tBeforePresent <= deadline;
+				if (!presentDeadlineHit) alpha *= 2.0;
 				ewmaRenderMs = (clampedRenderMs * alpha) + (ewmaRenderMs * (1.0 - alpha));
 
 				// Track high-level render loop stats
 				double preWaitMs = QpcToMs(t1 - t0);
 				double beforePresentMs = QpcToMs(t3 - t2);
-				double presentCallMs = QpcToMs(t4 - t3);
-				m_deviceResources->GetStats()->SubmitRenderStats(preWaitMs, renderMs, beforePresentMs, presentCallMs, hitDeadline);
+				double presentLockWaitMs = QpcToMs(tBeforePresent - tLockStart);
+				double presentDxgiCallMs = QpcToMs(t4 - tBeforePresent);
+				double presentTotalMs = QpcToMs(t4 - t3);
+				double presentSubmitEarlyMs = std::max(0.0, QpcToMs(deadline - tBeforePresent));
+				double presentSubmitLateMs = std::max(0.0, QpcToMs(tBeforePresent - deadline));
+				int64_t nextDeadlineAfterPresent = deadline;
+				while (nextDeadlineAfterPresent <= t4) {
+					nextDeadlineAfterPresent += MsToQpc(1000.0 / std::max(1.0, Pacer::instance().getObservedDisplayHz()));
+				}
+				double presentReturnToNextVblankMs = QpcToMs(nextDeadlineAfterPresent - t4);
+				m_deviceResources->GetStats()->SubmitRenderStats(preWaitMs,
+				                                                 renderMs,
+				                                                 beforePresentMs,
+				                                                 presentLockWaitMs,
+				                                                 presentDxgiCallMs,
+				                                                 presentTotalMs,
+				                                                 presentSubmitEarlyMs,
+				                                                 presentSubmitLateMs,
+				                                                 presentReturnToNextVblankMs,
+				                                                 presentDeadlineHit);
 
-				FQLog("render loop %.3fms %s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms PreWait %.3fms (max %.3fms) + Render %.3fms (avg %.3f) + WaitPresent %.3fms + Present %.3fms)\n",
+				FQLog("render loop %.3fms %s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms PreWait %.3fms (max %.3fms) + Render %.3fms (avg %.3f) + WaitPresent %.3fms + Lock %.3fms + PresentDxgi %.3fms + PresentTotal %.3fms early %.3fms late %.3fms)\n",
 				      QpcToMs(t4 - t0),                             // loop time
-				      hitDeadline ? " " : "M",                      // missed deadline?
+				      presentDeadlineHit ? " " : "M",               // missed deadline?
 				      isRepeatFrame ? "R" : " ",                    // repeated frame?
 				      preWaitMs > maxWaitMs + bufferMs ? "W" : " ", // we waited too long for a frame (including buffer)
 				      (double)currentFramePts / 90000.0,            // host's timestamp (in seconds)
@@ -327,7 +357,11 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				      renderMs,                                     // render time this frame
 				      ewmaRenderMs,                                 // average of render time used to control prewait
 				      beforePresentMs,                              // wait time to align present to vblank
-				      presentCallMs);                               // Present() call time
+				      presentLockWaitMs,                             // FFmpeg/D3D lock wait before Present()
+				      presentDxgiCallMs,                             // Present() call time
+				      presentTotalMs,                                // total time from pacing wait return through Present()
+				      presentSubmitEarlyMs,
+				      presentSubmitLateMs);
 			}
 		}
 

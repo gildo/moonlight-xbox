@@ -3,6 +3,7 @@
 #include "pch.h"
 #include <mutex>
 #include <string>
+#include <vector>
 #include "../Common/StepTimer.h"
 #include "../Utils/FloatBuffer.h"
 
@@ -39,7 +40,18 @@ typedef struct _VIDEO_STATS {
 	uint64_t totalRenderTimeUs;
 	uint64_t totalPresentTimeUs;
 	uint64_t totalPresentCallTimeUs;
+	uint64_t totalPresentLockWaitUs;
+	uint64_t totalPresentDxgiCallUs;
+	uint64_t totalPresentSubmitEarlyUs;
+	uint64_t totalPresentSubmitLateUs;
+	uint64_t totalPresentReturnToNextVblankUs;
 	double totalPresentDisplayMs;
+	double maxPresentDxgiCallMs;
+	double maxPresentTotalMs;
+	double maxPresentSubmitLateMs;
+	uint32_t presentBlockedFullIntervalCount;
+	uint32_t presentSubmitLateCount;
+	uint32_t missedPresentStreakMax;
 	uint32_t lastRtt;
 	uint32_t lastRttVariance;
 	double totalFps;
@@ -64,7 +76,16 @@ namespace moonlight_xbox_dx
 		void SubmitAvgQueueSize(float avgQueueSize);
 		void SubmitPacerTime(int64_t pacerTimeQpc);
 		void SubmitPresentPacing(double presentDisplayMs);
-		void SubmitRenderStats(double preWaitTimeMs, double renderTimeMs, double waitBeforePresentMs, double presentCallMs, bool hitDeadline);
+		void SubmitRenderStats(double preWaitTimeMs,
+		                       double renderTimeMs,
+		                       double waitBeforePresentMs,
+		                       double presentLockWaitMs,
+		                       double presentDxgiCallMs,
+		                       double presentTotalMs,
+		                       double presentSubmitEarlyMs,
+		                       double presentSubmitLateMs,
+		                       double presentReturnToNextVblankMs,
+		                       bool hitDeadline);
 
 	private:
 		void addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_STATS& dst);
@@ -79,5 +100,10 @@ namespace moonlight_xbox_dx
 		BandwidthTracker                     m_bwTracker;
 		float                                m_avgQueueSize;
 		double                               m_avgMbpsSmoothed;
+		uint32_t                            m_activeMissedPresentStreak;
+		std::vector<double>                  m_presentDxgiCallWindow;
+		std::vector<double>                  m_presentTotalWindow;
+		std::vector<double>                  m_presentSubmitEarlyWindow;
+		std::vector<double>                  m_presentSubmitLateWindow;
 	};
 }

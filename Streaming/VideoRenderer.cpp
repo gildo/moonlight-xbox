@@ -3,6 +3,7 @@
 #include <State\MoonlightClient.h>
 #include "..\Common\DirectXHelper.h"
 #include <Streaming\FFMpegDecoder.h>
+#include <Streaming\LabPacingConfig.h>
 #include <Utils.hpp>
 #include "..\Common\ModalDialog.xaml.h"
 
@@ -123,10 +124,9 @@ bool VideoRenderer::Render(AVFrame *frame) {
 		setupVideoTexture(ffmpegDesc);
 	}
 
-	// SRV 0 is always mapped to the video texture
-	UINT srvIndex = 0;
+	UINT srvIndex = m_VideoTextureRingIndex++ % m_VideoTextureRingSize;
 	// Copy this frame into our video texture
-	ctx->CopySubresourceRegion1(m_VideoTexture.Get(), 0, 0, 0, 0,
+	ctx->CopySubresourceRegion1(m_VideoTextures[srvIndex].Get(), 0, 0, 0, 0,
 	                            (ID3D11Resource *)frame->data[0], (int)(intptr_t)frame->data[1],
 	                            nullptr, D3D11_COPY_DISCARD);
 
@@ -306,6 +306,14 @@ void VideoRenderer::ReleaseDeviceDependentResources()
 	m_VideoVertexBuffer.Reset();
 	m_samplerState.Reset();
 	m_indexBuffer.Reset();
+	for (auto& texture : m_VideoTextures) {
+		texture.Reset();
+	}
+	for (auto& srvs : m_VideoTextureResourceViews) {
+		for (auto& srv : srvs) {
+			srv.Reset();
+		}
+	}
 }
 
 void VideoRenderer::scaleSourceToDestinationSurface(IRECT* src, IRECT* dst)
@@ -352,26 +360,41 @@ bool VideoRenderer::setupVideoTexture(D3D11_TEXTURE2D_DESC frameDesc)
 	texDesc.CPUAccessFlags = 0;
 	texDesc.MiscFlags = 0;
 
-	m_VideoTexture.Reset();
-	DX::ThrowIfFailed(m_deviceResources->GetD3DDevice()->CreateTexture2D(&texDesc, nullptr, &m_VideoTexture));
+	m_VideoTextureRingSize = static_cast<UINT>(LabPacingConfig::TextureRingSize());
+	m_VideoTextureRingIndex = 0;
+	for (auto& texture : m_VideoTextures) {
+		texture.Reset();
+	}
+	for (auto& srvs : m_VideoTextureResourceViews) {
+		for (auto& srv : srvs) {
+			srv.Reset();
+		}
+	}
 
 	// Create SRVs for the texture
 	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 	srvDesc.Texture2D.MostDetailedMip = 0;
 	srvDesc.Texture2D.MipLevels = 1;
-	size_t srvIndex = 0;
-	for (DXGI_FORMAT srvFormat : getVideoTextureSRVFormats(frameDesc.Format)) {
-		assert(srvIndex < m_VideoTextureResourceViews[0].size());
+	for (UINT textureIndex = 0; textureIndex < m_VideoTextureRingSize; textureIndex++) {
+		DX::ThrowIfFailed(m_deviceResources->GetD3DDevice()->CreateTexture2D(&texDesc, nullptr, &m_VideoTextures[textureIndex]));
 
-		m_VideoTextureResourceViews[0][srvIndex].Reset();
+		size_t srvIndex = 0;
+		for (DXGI_FORMAT srvFormat : getVideoTextureSRVFormats(frameDesc.Format)) {
+			assert(srvIndex < m_VideoTextureResourceViews[textureIndex].size());
 
-		srvDesc.Format = srvFormat;
-		DX::ThrowIfFailed(
-		    m_deviceResources->GetD3DDevice()->CreateShaderResourceView(m_VideoTexture.Get(), &srvDesc, &m_VideoTextureResourceViews[0][srvIndex]));
+			srvDesc.Format = srvFormat;
+			DX::ThrowIfFailed(
+			    m_deviceResources->GetD3DDevice()->CreateShaderResourceView(m_VideoTextures[textureIndex].Get(), &srvDesc, &m_VideoTextureResourceViews[textureIndex][srvIndex]));
 
-		srvIndex++;
+			srvIndex++;
+		}
 	}
+	Utils::Logf("Video texture ring configured: size=%u format=%u dimensions=%ux%u\n",
+	            m_VideoTextureRingSize,
+	            static_cast<unsigned int>(m_TextureFormat),
+	            m_TextureWidth,
+	            m_TextureHeight);
 
 	return true;
 }
@@ -686,4 +709,3 @@ void VideoRenderer::SetHDR(bool enabled)
 void VideoRenderer::Stop() {
 	// nothing to do
 }
-

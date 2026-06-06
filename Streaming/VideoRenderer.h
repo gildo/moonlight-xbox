@@ -4,6 +4,7 @@
 #include "Common\StepTimer.h"
 #include "State\MoonlightClient.h"
 #include "State\StreamConfiguration.h"
+#include <array>
 #include <atomic>
 
 extern "C" {
@@ -70,8 +71,10 @@ namespace moonlight_xbox_dx
 		Windows::Graphics::Display::Core::HdmiDisplayMode^ m_lastDisplayMode;
 		Windows::Graphics::Display::Core::HdmiDisplayMode^ m_currentDisplayMode;
 
-		Microsoft::WRL::ComPtr<ID3D11Texture2D>          m_VideoTexture;
-		std::array<std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>, 1> m_VideoTextureResourceViews;
+		std::array<Microsoft::WRL::ComPtr<ID3D11Texture2D>, 5> m_VideoTextures;
+		std::array<std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>, 5> m_VideoTextureResourceViews;
+		UINT m_VideoTextureRingIndex = 0;
+		UINT m_VideoTextureRingSize = 1;
 
 		// Variables used with the rendering loop.
 		DXGI_HDR_METADATA_HDR10 m_lastHdr10;
@@ -99,4 +102,3 @@ namespace moonlight_xbox_dx
 		AVChromaLocation m_LastChromaLocation = AVCHROMA_LOC_UNSPECIFIED;
 	};
 }
-
