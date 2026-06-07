@@ -150,6 +150,9 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 			",\"present_target_submit_late_count\":" + std::to_string(telemetryStats.presentTargetSubmitLateCount) +
 			",\"late_present_skip_count\":" + std::to_string(telemetryStats.latePresentSkipCount) +
 			",\"retained_frame_present_count\":" + std::to_string(telemetryStats.retainedFramePresentCount) +
+			",\"same_vblank_gate_count\":" + std::to_string(telemetryStats.sameVblankGateCount) +
+			",\"avg_same_vblank_gate_ms\":" + std::to_string(telemetryStats.sameVblankGateCount ? (double)telemetryStats.totalSameVblankGateUs / 1000.0 / telemetryStats.sameVblankGateCount : 0.0) +
+			",\"max_same_vblank_gate_ms\":" + std::to_string(telemetryStats.maxSameVblankGateMs) +
 			",\"missed_present_streak_max\":" + std::to_string(telemetryStats.missedPresentStreakMax) +
 			"," + LabPacingConfig::TelemetryFields() +
 			",\"rtt_ms\":" + std::to_string(telemetryStats.lastRtt) +
@@ -251,6 +254,8 @@ void Stats::SubmitRenderStats(double preWaitTimeMs,
                               double presentTargetSubmitEarlyMs,
                               double presentTargetSubmitLateMs,
                               double presentReturnToNextVblankMs,
+                              double sameVblankGateMs,
+                              bool sameVblankGated,
                               bool hitDeadline,
                               bool skippedLatePresent,
                               bool retainedFramePresented) {
@@ -297,6 +302,11 @@ void Stats::SubmitRenderStats(double preWaitTimeMs,
 	if (retainedFramePresented) {
 		m_ActiveWndVideoStats.retainedFramePresentCount++;
 	}
+	if (sameVblankGated) {
+		m_ActiveWndVideoStats.sameVblankGateCount++;
+		m_ActiveWndVideoStats.totalSameVblankGateUs += static_cast<uint64_t>(std::max(0.0, sameVblankGateMs) * 1000);
+		m_ActiveWndVideoStats.maxSameVblankGateMs = std::max(m_ActiveWndVideoStats.maxSameVblankGateMs, sameVblankGateMs);
+	}
 	m_presentDxgiCallWindow.push_back(presentDxgiCallMs);
 	m_presentTotalWindow.push_back(presentTotalMs);
 	m_presentSubmitEarlyWindow.push_back(std::max(0.0, presentSubmitEarlyMs));
@@ -340,6 +350,9 @@ void Stats::addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_ST
 	dst.presentTargetSubmitLateCount += src.presentTargetSubmitLateCount;
 	dst.latePresentSkipCount += src.latePresentSkipCount;
 	dst.retainedFramePresentCount += src.retainedFramePresentCount;
+	dst.sameVblankGateCount += src.sameVblankGateCount;
+	dst.totalSameVblankGateUs += src.totalSameVblankGateUs;
+	dst.maxSameVblankGateMs = std::max(dst.maxSameVblankGateMs, src.maxSameVblankGateMs);
 	dst.missedPresentStreakMax = std::max(dst.missedPresentStreakMax, src.missedPresentStreakMax);
 
 	if (dst.minHostProcessingLatency == 0) {

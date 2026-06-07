@@ -200,7 +200,7 @@ namespace {
 		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
 		case 6: SetVariant("K-retaineddeadline-adaptivebudget-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true, true, 2.5); break;
 		case 7: SetVariant("M-singledeadline-retainedrepeat-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true, true, 0.0); break;
-		case 8: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
+		case 8: SetVariant("N-refreshwindow-retainedrepeat-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true, true, 0.0); break;
 		}
 
 		try {

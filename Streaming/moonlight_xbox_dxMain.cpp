@@ -248,15 +248,30 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 			// Get overall deadline we must hit by the Present for this frame
 			int64_t deadline = Pacer::instance().getNextVBlankQpc(&t0);
 
+			double sameVblankGateMs = 0.0;
+			bool sameVblankGated = false;
+
 			// If Present() returns before the vblank we targeted, the next loop can
-			// see the same upcoming vblank again. Do not render/present twice for one
-			// display interval; wait for that boundary to pass and schedule the next one.
-			if (lastScheduledDeadline > 0 && deadline <= lastScheduledDeadline) {
+			// see the same physical vblank again. The QPC can move slightly when the
+			// vsync stats thread refreshes, so compare by refresh window instead of exact equality.
+			double observedDisplayHz = std::max(1.0, Pacer::instance().getObservedDisplayHz());
+			int64_t displayIntervalQpc = MsToQpc(1000.0 / observedDisplayHz);
+			int64_t sameVblankWindowQpc = displayIntervalQpc / 2;
+			if (lastScheduledDeadline > 0 && deadline < lastScheduledDeadline + sameVblankWindowQpc) {
+				int64_t gateStart = QpcNow();
 				int64_t gateUntil = lastScheduledDeadline + MsToQpc(0.10);
 				if (gateUntil > t0) {
 					SleepUntilQpc(gateUntil);
 				}
 				deadline = Pacer::instance().getNextVBlankQpc(&t0);
+				if (deadline < lastScheduledDeadline + sameVblankWindowQpc) {
+					deadline = lastScheduledDeadline + displayIntervalQpc;
+					while (deadline <= t0) {
+						deadline += displayIntervalQpc;
+					}
+				}
+				sameVblankGateMs = QpcToMs(QpcNow() - gateStart);
+				sameVblankGated = true;
 			}
 			lastScheduledDeadline = deadline;
 
@@ -411,6 +426,8 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 			                                                 presentTargetSubmitEarlyMs,
 			                                                 presentTargetSubmitLateMs,
 			                                                 presentReturnToNextVblankMs,
+			                                                 sameVblankGateMs,
+			                                                 sameVblankGated,
 			                                                 presentDeadlineHit,
 			                                                 skippedLatePresent,
 			                                                 retainedFramePresented);
