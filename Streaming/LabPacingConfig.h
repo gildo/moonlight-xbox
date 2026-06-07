@@ -26,6 +26,7 @@ namespace moonlight_xbox_dx {
 namespace LabPacingConfig {
 	void Initialize();
 	void ReloadForStream();
+	void MarkStreamStarted();
 	const std::string& VariantLabel();
 	int PresentSyncInterval();
 	bool ManualPresentWait();

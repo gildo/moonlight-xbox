@@ -26,6 +26,7 @@ namespace {
 	int g_maxFrameLatency = 1;
 	int g_textureRingSize = 1;
 	bool g_loadedJsonConfig = false;
+	bool g_preparedForPendingStream = false;
 
 	int ReadIntSetting(const wchar_t* key, int fallback) {
 		try {
@@ -209,9 +210,19 @@ void LabPacingConfig::Initialize() {
 
 void LabPacingConfig::ReloadForStream() {
 	std::lock_guard<std::mutex> lock(g_configMutex);
+	if (g_preparedForPendingStream) {
+		Utils::Logf("Reusing pending lab pacing config for stream setup: variant=%s\n", g_variantLabel.c_str());
+		return;
+	}
 	ResetDefaults();
 	LoadConfig();
+	g_preparedForPendingStream = true;
 	g_initialized.store(true, std::memory_order_release);
+}
+
+void LabPacingConfig::MarkStreamStarted() {
+	std::lock_guard<std::mutex> lock(g_configMutex);
+	g_preparedForPendingStream = false;
 }
 
 const std::string& LabPacingConfig::VariantLabel() {
