@@ -42,6 +42,7 @@ namespace LabPacingConfig {
 	bool SkipLatePresent();
 	double LatePresentSkipGraceMs();
 	double RenderSafetyMs();
+	bool AdaptivePacingBudget();
 	std::string TelemetryFields();
 }
 }

@@ -29,6 +29,7 @@ namespace {
 	bool g_skipLatePresent = false;
 	double g_latePresentSkipGraceMs = 0.0;
 	double g_renderSafetyMs = 1.5;
+	bool g_adaptivePacingBudget = false;
 	bool g_loadedJsonConfig = false;
 	bool g_preparedForPendingStream = false;
 	ULONGLONG g_lastStreamConfigMs = 0;
@@ -115,6 +116,7 @@ namespace {
 			g_skipLatePresent = config.value("skip_late_present", g_skipLatePresent);
 			g_latePresentSkipGraceMs = config.value("late_present_skip_grace_ms", g_latePresentSkipGraceMs);
 			g_renderSafetyMs = config.value("render_safety_ms", g_renderSafetyMs);
+			g_adaptivePacingBudget = config.value("adaptive_pacing_budget", g_adaptivePacingBudget);
 			Utils::Logf("Loaded lab pacing config from LocalState moonlight-lab-pacing.json\n");
 			return true;
 		}
@@ -150,6 +152,7 @@ namespace {
 	                bool skipLatePresent = false,
 	                double latePresentSkipGraceMs = 0.0,
 	                double renderSafetyMs = 1.5,
+	                bool adaptivePacingBudget = false,
 	                bool noLockAroundPresent = ML_LAB_NO_LOCK_PRESENT_DEFAULT != 0) {
 		g_variantLabel = label;
 		g_presentSyncInterval = presentSyncInterval;
@@ -165,6 +168,7 @@ namespace {
 		g_skipLatePresent = skipLatePresent;
 		g_latePresentSkipGraceMs = latePresentSkipGraceMs;
 		g_renderSafetyMs = renderSafetyMs;
+		g_adaptivePacingBudget = adaptivePacingBudget;
 	}
 
 	void ApplyAutoVariant() {
@@ -179,15 +183,16 @@ namespace {
 			index = 0;
 		}
 
-		switch (((index % 8) + 8) % 8) {
+		switch (((index % 9) + 9) % 9) {
 		case 0: SetVariant("A-current", 0, true, 0.0, 5, 1, false); break;
 		case 1: SetVariant("B-candidate-lead2-buf3-ring3", 0, true, 2.0, 3, 3, false); break;
 		case 2: SetVariant("C-sync1-candidate-buf3-ring3", 1, true, 2.0, 3, 3, false); break;
 		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
 		case 4: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
 		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
-		case 6: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
+		case 6: SetVariant("J-lead2-adaptivebudget-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true); break;
 		case 7: SetVariant("I-lead2-targetwait-grace6-safety25-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5); break;
+		case 8: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		}
 
 		try {
@@ -216,6 +221,7 @@ namespace {
 		g_skipLatePresent = false;
 		g_latePresentSkipGraceMs = 0.0;
 		g_renderSafetyMs = 1.5;
+		g_adaptivePacingBudget = false;
 		g_loadedJsonConfig = false;
 	}
 
@@ -239,8 +245,9 @@ namespace {
 		g_skipLatePresent = ReadIntSetting(L"xbox_lab_skip_late_present", g_skipLatePresent ? 1 : 0) != 0;
 		g_latePresentSkipGraceMs = std::clamp(ReadDoubleSetting(L"xbox_lab_late_present_skip_grace_ms", g_latePresentSkipGraceMs), 0.0, 16.0);
 		g_renderSafetyMs = std::clamp(ReadDoubleSetting(L"xbox_lab_render_safety_ms", g_renderSafetyMs), 0.5, 8.0);
+		g_adaptivePacingBudget = ReadIntSetting(L"xbox_lab_adaptive_pacing_budget", g_adaptivePacingBudget ? 1 : 0) != 0;
 
-		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d lead_aware_frame_wait=%d skip_late_present=%d late_present_skip_grace_ms=%.3f render_safety_ms=%.3f\n",
+		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d lead_aware_frame_wait=%d skip_late_present=%d late_present_skip_grace_ms=%.3f render_safety_ms=%.3f adaptive_pacing_budget=%d\n",
 		            g_variantLabel.c_str(),
 		            g_presentSyncInterval,
 		            g_manualPresentWait ? 1 : 0,
@@ -255,7 +262,8 @@ namespace {
 		            g_leadAwareFrameWait ? 1 : 0,
 		            g_skipLatePresent ? 1 : 0,
 		            g_latePresentSkipGraceMs,
-		            g_renderSafetyMs);
+		            g_renderSafetyMs,
+		            g_adaptivePacingBudget ? 1 : 0);
 
 		LabLogger::Event("lab_pacing_config", LabPacingConfig::TelemetryFields());
 	}
@@ -288,6 +296,7 @@ namespace {
 			g_skipLatePresent = config.value("skip_late_present", g_skipLatePresent);
 			g_latePresentSkipGraceMs = config.value("late_present_skip_grace_ms", g_latePresentSkipGraceMs);
 			g_renderSafetyMs = config.value("render_safety_ms", g_renderSafetyMs);
+			g_adaptivePacingBudget = config.value("adaptive_pacing_budget", g_adaptivePacingBudget);
 			g_loadedJsonConfig = config.value("loaded_json_config", g_loadedJsonConfig);
 			Utils::Logf("Reused pending lab pacing config from LocalState: variant=%s\n", g_variantLabel.c_str());
 			LabLogger::Event("lab_pacing_config_reuse", LabPacingConfig::TelemetryFields());
@@ -321,6 +330,7 @@ namespace {
 			config["skip_late_present"] = g_skipLatePresent;
 			config["late_present_skip_grace_ms"] = g_latePresentSkipGraceMs;
 			config["render_safety_ms"] = g_renderSafetyMs;
+			config["adaptive_pacing_budget"] = g_adaptivePacingBudget;
 			config["loaded_json_config"] = g_loadedJsonConfig;
 
 			std::ofstream out(Utils::WideToNarrowString(LocalPendingConfigPath()), std::ios::trunc);
@@ -458,6 +468,11 @@ double LabPacingConfig::RenderSafetyMs() {
 	return g_renderSafetyMs;
 }
 
+bool LabPacingConfig::AdaptivePacingBudget() {
+	Initialize();
+	return g_adaptivePacingBudget;
+}
+
 std::string LabPacingConfig::TelemetryFields() {
 	return "\"variant_label\":\"" + g_variantLabel + "\"" +
 		",\"present_interval\":" + std::to_string(g_presentSyncInterval) +
@@ -474,5 +489,6 @@ std::string LabPacingConfig::TelemetryFields() {
 		",\"skip_late_present\":" + std::to_string(g_skipLatePresent ? 1 : 0) +
 		",\"late_present_skip_grace_ms\":" + std::to_string(g_latePresentSkipGraceMs) +
 		",\"render_safety_ms\":" + std::to_string(g_renderSafetyMs) +
+		",\"adaptive_pacing_budget\":" + std::to_string(g_adaptivePacingBudget ? 1 : 0) +
 		",\"config_source\":\"" + (g_loadedJsonConfig ? std::string("json") : std::string("auto-cycle")) + "\"";
 }
