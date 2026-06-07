@@ -4,6 +4,7 @@
 #include "Utils.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <fstream>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -11,7 +12,8 @@
 using namespace moonlight_xbox_dx;
 
 namespace {
-	std::once_flag g_initOnce;
+	std::mutex g_configMutex;
+	std::atomic<bool> g_initialized{false};
 	std::string g_variantLabel = "default";
 	int g_presentSyncInterval = ML_LAB_PRESENT_SYNC_INTERVAL_DEFAULT;
 	bool g_manualPresentWait = true;
@@ -143,7 +145,22 @@ namespace {
 		Utils::Logf("Auto-selected lab pacing variant index=%d label=%s\n", index, g_variantLabel.c_str());
 	}
 
-	void InitOnce() {
+	void ResetDefaults() {
+		g_variantLabel = "default";
+		g_presentSyncInterval = ML_LAB_PRESENT_SYNC_INTERVAL_DEFAULT;
+		g_manualPresentWait = true;
+		g_presentLeadMs = 0.0;
+		g_swapchainBuffers = ML_LAB_SWAPCHAIN_BUFFERS_DEFAULT;
+		g_frameQueueHwm = ML_LAB_FRAME_QUEUE_HWM_DEFAULT;
+		g_decoderThrottleMs = ML_LAB_DECODER_THROTTLE_MS_DEFAULT;
+		g_noLockAroundPresent = ML_LAB_NO_LOCK_PRESENT_DEFAULT != 0;
+		g_waitableSwapChain = false;
+		g_maxFrameLatency = 1;
+		g_textureRingSize = 1;
+		g_loadedJsonConfig = false;
+	}
+
+	void LoadConfig() {
 		g_loadedJsonConfig = ReadJsonConfig();
 		if (!g_loadedJsonConfig) {
 			ApplyAutoVariant();
@@ -178,7 +195,23 @@ namespace {
 }
 
 void LabPacingConfig::Initialize() {
-	std::call_once(g_initOnce, InitOnce);
+	if (g_initialized.load(std::memory_order_acquire)) {
+		return;
+	}
+
+	std::lock_guard<std::mutex> lock(g_configMutex);
+	if (!g_initialized.load(std::memory_order_relaxed)) {
+		ResetDefaults();
+		LoadConfig();
+		g_initialized.store(true, std::memory_order_release);
+	}
+}
+
+void LabPacingConfig::ReloadForStream() {
+	std::lock_guard<std::mutex> lock(g_configMutex);
+	ResetDefaults();
+	LoadConfig();
+	g_initialized.store(true, std::memory_order_release);
 }
 
 const std::string& LabPacingConfig::VariantLabel() {
