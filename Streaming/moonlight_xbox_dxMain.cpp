@@ -266,8 +266,9 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				deadline = Pacer::instance().getNextVBlankQpc(&t0);
 				if (deadline < lastScheduledDeadline + sameVblankWindowQpc) {
 					deadline = lastScheduledDeadline + displayIntervalQpc;
-					while (deadline <= t0) {
-						deadline += displayIntervalQpc;
+					if (deadline <= t0) {
+						const int64_t intervalsBehind = ((t0 - deadline) / displayIntervalQpc) + 1;
+						deadline += intervalsBehind * displayIntervalQpc;
 					}
 				}
 				sameVblankGateMs = QpcToMs(QpcNow() - gateStart);
@@ -390,8 +391,10 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 			double presentWaitTargetSubmitLateMs = std::max(0.0, QpcToMs(tBeforePresent - presentWaitTarget));
 			bool presentDeadlineHit = !skippedLatePresent && tBeforePresent <= deadline;
 			int64_t nextDeadlineAfterPresent = deadline;
-			while (nextDeadlineAfterPresent <= t4) {
-				nextDeadlineAfterPresent += MsToQpc(1000.0 / std::max(1.0, Pacer::instance().getObservedDisplayHz()));
+			if (nextDeadlineAfterPresent <= t4) {
+				const int64_t intervalQpc = MsToQpc(1000.0 / std::max(1.0, Pacer::instance().getObservedDisplayHz()));
+				const int64_t intervalsBehind = ((t4 - nextDeadlineAfterPresent) / intervalQpc) + 1;
+				nextDeadlineAfterPresent += intervalsBehind * intervalQpc;
 			}
 			double presentReturnToNextVblankMs = QpcToMs(nextDeadlineAfterPresent - t4);
 

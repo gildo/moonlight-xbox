@@ -448,8 +448,9 @@ int64_t Pacer::getNextVBlankQpc(int64_t *now) {
 		interval = m_VsyncIntervalQpc;
 		int64_t next = m_LastSyncQpc + static_cast<int64_t>(m_ewmaVsyncDriftQpc);
 
-		while (next < *now) {
-			next += interval;
+		if (next <= *now) {
+			const int64_t intervalsBehind = ((*now - next) / interval) + 1;
+			next += intervalsBehind * interval;
 		}
 		target = next;
 	}

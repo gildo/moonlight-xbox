@@ -148,7 +148,9 @@ void LabLogger::Telemetry(const std::string& fields) {
 		line += fields;
 	}
 	line += "}";
-	AppendLine("moonlight-lab-telemetry.ndjson", line);
+	concurrency::create_task([line]() {
+		AppendLine("moonlight-lab-telemetry.ndjson", line);
+	});
 }
 
 void LabLogger::NoteFrame(uint32_t frameNumber) {

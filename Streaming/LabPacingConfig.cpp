@@ -135,11 +135,6 @@ namespace {
 		return false;
 	}
 
-	std::wstring LocalVariantIndexPath() {
-		auto folder = Windows::Storage::ApplicationData::Current->LocalFolder->Path;
-		return std::wstring(folder->Data()) + L"\\moonlight-lab-variant-index.txt";
-	}
-
 	std::wstring LocalPendingConfigPath() {
 		auto folder = Windows::Storage::ApplicationData::Current->LocalFolder->Path;
 		return std::wstring(folder->Data()) + L"\\moonlight-lab-pending-pacing.json";
@@ -179,38 +174,10 @@ namespace {
 		g_retainedFrameFallbackMarginMs = retainedFrameFallbackMarginMs;
 	}
 
-	void ApplyAutoVariant() {
-		int index = 0;
-		try {
-			std::ifstream in(Utils::WideToNarrowString(LocalVariantIndexPath()));
-			if (in) {
-				in >> index;
-			}
-		}
-		catch (...) {
-			index = 0;
-		}
-
-		switch (((index % 9) + 9) % 9) {
-		case 0: SetVariant("A-current", 0, true, 0.0, 5, 1, false); break;
-		case 1: SetVariant("B-candidate-lead2-buf3-ring3", 0, true, 2.0, 3, 3, false); break;
-		case 2: SetVariant("C-sync1-candidate-buf3-ring3", 1, true, 2.0, 3, 3, false); break;
-		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
-		case 4: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
-		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
-		case 6: SetVariant("K-retaineddeadline-adaptivebudget-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true, true, 2.5); break;
-		case 7: SetVariant("M-singledeadline-retainedrepeat-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true, true, 0.0); break;
-		case 8: SetVariant("N-refreshwindow-retainedrepeat-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true, true, 0.0); break;
-		}
-
-		try {
-			std::ofstream out(Utils::WideToNarrowString(LocalVariantIndexPath()), std::ios::trunc);
-			out << (index + 1) << "\n";
-		}
-		catch (...) {
-			Utils::Logf("Failed to write moonlight-lab-variant-index.txt\n");
-		}
-		Utils::Logf("Auto-selected lab pacing variant index=%d label=%s\n", index, g_variantLabel.c_str());
+	void ApplyDefaultVariant() {
+		SetVariant("P-xboxones-refreshwindow-production", 0, true, 2.0, 3, 3,
+		           false, true, true, 6.0, 2.5, true, true, 0.0);
+		Utils::Logf("Selected production pacing variant label=%s\n", g_variantLabel.c_str());
 	}
 
 	void ResetDefaults() {
@@ -238,7 +205,7 @@ namespace {
 	void LoadConfig() {
 		g_loadedJsonConfig = ReadJsonConfig();
 		if (!g_loadedJsonConfig) {
-			ApplyAutoVariant();
+			ApplyDefaultVariant();
 		}
 
 		g_presentSyncInterval = std::clamp(ReadIntSetting(L"xbox_lab_present_interval", g_presentSyncInterval), 0, 1);
@@ -520,5 +487,5 @@ std::string LabPacingConfig::TelemetryFields() {
 		",\"adaptive_pacing_budget\":" + std::to_string(g_adaptivePacingBudget ? 1 : 0) +
 		",\"retained_frame_fallback\":" + std::to_string(g_retainedFrameFallback ? 1 : 0) +
 		",\"retained_frame_fallback_margin_ms\":" + std::to_string(g_retainedFrameFallbackMarginMs) +
-		",\"config_source\":\"" + (g_loadedJsonConfig ? std::string("json") : std::string("auto-cycle")) + "\"";
+		",\"config_source\":\"" + (g_loadedJsonConfig ? std::string("json") : std::string("production-default")) + "\"";
 }
