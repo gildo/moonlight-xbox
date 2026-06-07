@@ -97,6 +97,11 @@ namespace {
 		return std::wstring(folder->Data()) + L"\\moonlight-lab-variant-index.txt";
 	}
 
+	std::wstring LocalPendingConfigPath() {
+		auto folder = Windows::Storage::ApplicationData::Current->LocalFolder->Path;
+		return std::wstring(folder->Data()) + L"\\moonlight-lab-pending-pacing.json";
+	}
+
 	void SetVariant(const char* label,
 	                int presentSyncInterval,
 	                bool manualPresentWait,
@@ -132,7 +137,8 @@ namespace {
 		// Recovery slot: 1.18.1.12 double-advanced LocalState to index 8 before E was measured.
 		case 1: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		case 2: SetVariant("C-sync1-candidate-buf3-ring3", 1, true, 2.0, 3, 3, false); break;
-		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
+		// Recovery slot: 1.18.1.13 double-advanced LocalState to index 10 before E was measured.
+		case 3: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		case 4: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
 		// Recovery slot: 1.18.1.10 double-advanced LocalState to index 6 before E was measured.
@@ -196,6 +202,69 @@ namespace {
 
 		LabLogger::Event("lab_pacing_config", LabPacingConfig::TelemetryFields());
 	}
+
+	bool LoadPendingConfig(ULONGLONG nowMs) {
+		try {
+			std::ifstream file(Utils::WideToNarrowString(LocalPendingConfigPath()));
+			if (!file) {
+				return false;
+			}
+
+			nlohmann::json config = nlohmann::json::parse(file, nullptr, true, true);
+			ULONGLONG selectedAtMs = config.value("selected_at_ms", 0ULL);
+			if (selectedAtMs == 0 || nowMs < selectedAtMs || nowMs - selectedAtMs > 5000) {
+				return false;
+			}
+
+			g_variantLabel = config.value("variant_label", g_variantLabel);
+			g_presentSyncInterval = config.value("present_sync_interval", g_presentSyncInterval);
+			g_manualPresentWait = config.value("manual_present_wait", g_manualPresentWait);
+			g_presentLeadMs = config.value("present_lead_ms", g_presentLeadMs);
+			g_swapchainBuffers = config.value("swapchain_buffers", g_swapchainBuffers);
+			g_frameQueueHwm = config.value("frame_queue_hwm", g_frameQueueHwm);
+			g_decoderThrottleMs = config.value("decoder_throttle_ms", g_decoderThrottleMs);
+			g_noLockAroundPresent = config.value("no_lock_present", g_noLockAroundPresent);
+			g_waitableSwapChain = config.value("waitable_swapchain", g_waitableSwapChain);
+			g_maxFrameLatency = config.value("max_frame_latency", g_maxFrameLatency);
+			g_textureRingSize = config.value("texture_ring_size", g_textureRingSize);
+			g_loadedJsonConfig = config.value("loaded_json_config", g_loadedJsonConfig);
+			Utils::Logf("Reused pending lab pacing config from LocalState: variant=%s\n", g_variantLabel.c_str());
+			LabLogger::Event("lab_pacing_config_reuse", LabPacingConfig::TelemetryFields());
+			return true;
+		}
+		catch (const std::exception& e) {
+			Utils::Logf("Failed to load pending lab pacing config: %s\n", e.what());
+		}
+		catch (...) {
+			Utils::Logf("Failed to load pending lab pacing config\n");
+		}
+		return false;
+	}
+
+	void SavePendingConfig(ULONGLONG selectedAtMs) {
+		try {
+			nlohmann::json config;
+			config["selected_at_ms"] = selectedAtMs;
+			config["variant_label"] = g_variantLabel;
+			config["present_sync_interval"] = g_presentSyncInterval;
+			config["manual_present_wait"] = g_manualPresentWait;
+			config["present_lead_ms"] = g_presentLeadMs;
+			config["swapchain_buffers"] = g_swapchainBuffers;
+			config["frame_queue_hwm"] = g_frameQueueHwm;
+			config["decoder_throttle_ms"] = g_decoderThrottleMs;
+			config["no_lock_present"] = g_noLockAroundPresent;
+			config["waitable_swapchain"] = g_waitableSwapChain;
+			config["max_frame_latency"] = g_maxFrameLatency;
+			config["texture_ring_size"] = g_textureRingSize;
+			config["loaded_json_config"] = g_loadedJsonConfig;
+
+			std::ofstream out(Utils::WideToNarrowString(LocalPendingConfigPath()), std::ios::trunc);
+			out << config.dump() << "\n";
+		}
+		catch (...) {
+			Utils::Logf("Failed to save pending lab pacing config\n");
+		}
+	}
 }
 
 void LabPacingConfig::Initialize() {
@@ -219,9 +288,16 @@ void LabPacingConfig::ReloadForStream() {
 		return;
 	}
 	ResetDefaults();
+	if (LoadPendingConfig(nowMs)) {
+		g_preparedForPendingStream = true;
+		g_lastStreamConfigMs = nowMs;
+		g_initialized.store(true, std::memory_order_release);
+		return;
+	}
 	LoadConfig();
 	g_preparedForPendingStream = true;
 	g_lastStreamConfigMs = nowMs;
+	SavePendingConfig(nowMs);
 	g_initialized.store(true, std::memory_order_release);
 }
 
