@@ -41,6 +41,16 @@ Stats::Stats() :
 bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char* output, size_t length)
 {
 	bool shouldUpdate = false;
+	bool shouldWriteTelemetry = false;
+	VIDEO_STATS displayStats = {};
+	VIDEO_STATS telemetryStats = {};
+	float avgQueueSizeSnapshot = 0.0f;
+	std::vector<double> presentDxgiCallWindow;
+	std::vector<double> presentTotalWindow;
+	std::vector<double> presentSubmitEarlyWindow;
+	std::vector<double> presentSubmitLateWindow;
+	std::vector<double> presentTargetSubmitEarlyWindow;
+	std::vector<double> presentTargetSubmitLateWindow;
 
 	if (isVisible && ImGuiPlots::instance().isEnabled()) {
 		const double alpha = 0.1f;
@@ -54,25 +64,50 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 
 		if (isVisible) {
 			// Display using data from the last 2 window periods
-			VIDEO_STATS lastTwoWndStats = {};
-			addVideoStats(timer, m_LastWndVideoStats, lastTwoWndStats);
-			addVideoStats(timer, m_ActiveWndVideoStats, lastTwoWndStats);
-
-			formatVideoStats(timer, lastTwoWndStats, output, length);
+			addVideoStats(timer, m_LastWndVideoStats, displayStats);
+			addVideoStats(timer, m_ActiveWndVideoStats, displayStats);
 			shouldUpdate = true;
 		}
 
 		// Accumulate these values into the global stats
 		addVideoStats(timer, m_ActiveWndVideoStats, m_GlobalVideoStats);
 
-		VIDEO_STATS telemetryStats = {};
 		addVideoStats(timer, m_ActiveWndVideoStats, telemetryStats);
-		double presentDxgiP95 = Percentile(m_presentDxgiCallWindow, 95.0);
-		double presentTotalP95 = Percentile(m_presentTotalWindow, 95.0);
-		double presentSubmitEarlyP95 = Percentile(m_presentSubmitEarlyWindow, 95.0);
-		double presentSubmitLateP95 = Percentile(m_presentSubmitLateWindow, 95.0);
-		double presentTargetSubmitEarlyP95 = Percentile(m_presentTargetSubmitEarlyWindow, 95.0);
-		double presentTargetSubmitLateP95 = Percentile(m_presentTargetSubmitLateWindow, 95.0);
+		avgQueueSizeSnapshot = m_avgQueueSize;
+		presentDxgiCallWindow = m_presentDxgiCallWindow;
+		presentTotalWindow = m_presentTotalWindow;
+		presentSubmitEarlyWindow = m_presentSubmitEarlyWindow;
+		presentSubmitLateWindow = m_presentSubmitLateWindow;
+		presentTargetSubmitEarlyWindow = m_presentTargetSubmitEarlyWindow;
+		presentTargetSubmitLateWindow = m_presentTargetSubmitLateWindow;
+		shouldWriteTelemetry = true;
+
+		// Move this window into the last window slot and clear it for next window
+		memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(VIDEO_STATS));
+		ZeroMemory(&m_ActiveWndVideoStats, sizeof(VIDEO_STATS));
+		m_ActiveWndVideoStats.measurementStartTimestamp = timer.GetTotalSeconds();
+		m_presentDxgiCallWindow.clear();
+		m_presentTotalWindow.clear();
+		m_presentSubmitEarlyWindow.clear();
+		m_presentSubmitLateWindow.clear();
+		m_presentTargetSubmitEarlyWindow.clear();
+		m_presentTargetSubmitLateWindow.clear();
+	}
+
+	if (shouldWriteTelemetry) {
+		double avgVideoMbps = m_bwTracker.GetAverageMbps();
+		double peakVideoMbps = m_bwTracker.GetPeakMbps();
+		double presentDxgiP95 = Percentile(presentDxgiCallWindow, 95.0);
+		double presentTotalP95 = Percentile(presentTotalWindow, 95.0);
+		double presentSubmitEarlyP95 = Percentile(presentSubmitEarlyWindow, 95.0);
+		double presentSubmitLateP95 = Percentile(presentSubmitLateWindow, 95.0);
+		double presentTargetSubmitEarlyP95 = Percentile(presentTargetSubmitEarlyWindow, 95.0);
+		double presentTargetSubmitLateP95 = Percentile(presentTargetSubmitLateWindow, 95.0);
+
+		if (shouldUpdate) {
+			formatVideoStats(timer, displayStats, output, length, avgQueueSizeSnapshot, avgVideoMbps, peakVideoMbps);
+		}
+
 		LabLogger::Telemetry(
 			"\"received_frames\":" + std::to_string(telemetryStats.receivedFrames) +
 			",\"decoded_frames\":" + std::to_string(telemetryStats.decodedFrames) +
@@ -81,12 +116,12 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 			",\"pacer_dropped_frames\":" + std::to_string(telemetryStats.pacerDroppedFrames) +
 			",\"hit_deadlines\":" + std::to_string(telemetryStats.hitDeadlines) +
 			",\"missed_deadlines\":" + std::to_string(telemetryStats.missedDeadlines) +
-			",\"avg_mbps\":" + std::to_string(m_bwTracker.GetAverageMbps()) +
-			",\"peak_mbps\":" + std::to_string(m_bwTracker.GetPeakMbps()) +
+			",\"avg_mbps\":" + std::to_string(avgVideoMbps) +
+			",\"peak_mbps\":" + std::to_string(peakVideoMbps) +
 			",\"queue_depth\":" + std::to_string(FrameQueue::instance().count()) +
 			",\"frame_queue_hwm\":" + std::to_string(FrameQueue::instance().highWaterMark()) +
 			",\"frame_queue_capacity\":" + std::to_string(FrameQueue::instance().maxCapacity()) +
-			",\"avg_queue_depth\":" + std::to_string(m_avgQueueSize) +
+			",\"avg_queue_depth\":" + std::to_string(avgQueueSizeSnapshot) +
 			",\"avg_decode_ms\":" + std::to_string(telemetryStats.decodedFrames ? telemetryStats.totalDecodeTime / telemetryStats.decodedFrames : 0.0) +
 			",\"avg_wait_for_frame_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPreWaitTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
 			",\"avg_render_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalRenderTimeUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
@@ -118,17 +153,6 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 			"," + LabPacingConfig::TelemetryFields() +
 			",\"rtt_ms\":" + std::to_string(telemetryStats.lastRtt) +
 			",\"rtt_variance_ms\":" + std::to_string(telemetryStats.lastRttVariance));
-
-		// Move this window into the last window slot and clear it for next window
-		memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(VIDEO_STATS));
-		ZeroMemory(&m_ActiveWndVideoStats, sizeof(VIDEO_STATS));
-		m_ActiveWndVideoStats.measurementStartTimestamp = timer.GetTotalSeconds();
-		m_presentDxgiCallWindow.clear();
-		m_presentTotalWindow.clear();
-		m_presentSubmitEarlyWindow.clear();
-		m_presentSubmitLateWindow.clear();
-		m_presentTargetSubmitEarlyWindow.clear();
-		m_presentTargetSubmitLateWindow.clear();
 	}
 
 	return shouldUpdate;
@@ -348,7 +372,13 @@ void Stats::addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_ST
 	dst.renderedFps = (double)dst.renderedFrames / (now - dst.measurementStartTimestamp);
 }
 
-void Stats::formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, char* output, size_t length) {
+void Stats::formatVideoStats(DX::StepTimer const& timer,
+                             VIDEO_STATS& stats,
+                             char* output,
+                             size_t length,
+                             float avgQueueSize,
+                             double avgVideoMbps,
+                             double peakVideoMbps) {
 	FFMpegDecoder& ffmpeg = FFMpegDecoder::instance();
 	Pacer& pacer = Pacer::instance();
 
@@ -445,9 +475,6 @@ void Stats::formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, cha
 
 		offset += ret;
 
-		double avgVideoMbps = m_bwTracker.GetAverageMbps();
-		double peakVideoMbps = m_bwTracker.GetPeakMbps();
-
 		ret = snprintf(&output[offset],
 					   length - offset,
 					   "Bitrate: %.1f Mbps, Peak (%us): %.1f\n"
@@ -526,7 +553,7 @@ void Stats::formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, cha
 					   rttString,
 					   stats.decodedFrames ? (double)stats.totalReassemblyTimeUs / 1000.0 / stats.decodedFrames : 0.0f,
 					   stats.decodedFrames ? (double)stats.totalDecodeTime / stats.decodedFrames : 0.0f,
-					   m_avgQueueSize,
+					   avgQueueSize,
 					   stats.renderedFrames ? (double)stats.totalPacerTimeUs / 1000.0 / stats.renderedFrames : 0.0f,
 					   stats.renderedFrames ? (double)stats.totalRenderTimeUs / 1000.0 / stats.renderedFrames : 0.0f,
 					   stats.renderedFrames ? (double)stats.totalPresentTimeUs / 1000.0 / stats.renderedFrames : 0.0f);

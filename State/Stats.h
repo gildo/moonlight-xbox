@@ -97,7 +97,13 @@ namespace moonlight_xbox_dx
 
 	private:
 		void addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_STATS& dst);
-		void formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, char* output, size_t length);
+		void formatVideoStats(DX::StepTimer const& timer,
+		                      VIDEO_STATS& stats,
+		                      char* output,
+		                      size_t length,
+		                      float avgQueueSize,
+		                      double avgVideoMbps,
+		                      double peakVideoMbps);
 
 		std::mutex                           m_mutex;
 
