@@ -147,7 +147,7 @@ namespace {
 		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
 		case 4: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
 		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
-		case 6: SetVariant("G-waitable-buf3-ring3", 1, false, 0.0, 3, 3, true); break;
+		case 6: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
 		case 7: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		}
 
