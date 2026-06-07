@@ -25,6 +25,8 @@ namespace {
 	bool g_waitableSwapChain = false;
 	int g_maxFrameLatency = 1;
 	int g_textureRingSize = 1;
+	bool g_leadAwareFrameWait = false;
+	bool g_skipLatePresent = false;
 	bool g_loadedJsonConfig = false;
 	bool g_preparedForPendingStream = false;
 	ULONGLONG g_lastStreamConfigMs = 0;
@@ -78,6 +80,8 @@ namespace {
 			g_waitableSwapChain = config.value("waitable_swapchain", g_waitableSwapChain);
 			g_maxFrameLatency = config.value("max_frame_latency", g_maxFrameLatency);
 			g_textureRingSize = config.value("texture_ring_size", g_textureRingSize);
+			g_leadAwareFrameWait = config.value("lead_aware_frame_wait", g_leadAwareFrameWait);
+			g_skipLatePresent = config.value("skip_late_present", g_skipLatePresent);
 			Utils::Logf("Loaded lab pacing config from LocalState moonlight-lab-pacing.json\n");
 			return true;
 		}
@@ -108,7 +112,9 @@ namespace {
 	                double presentLeadMs,
 	                int swapchainBuffers,
 	                int textureRingSize,
-	                bool waitableSwapChain) {
+	                bool waitableSwapChain,
+	                bool leadAwareFrameWait = false,
+	                bool skipLatePresent = false) {
 		g_variantLabel = label;
 		g_presentSyncInterval = presentSyncInterval;
 		g_manualPresentWait = manualPresentWait;
@@ -118,6 +124,8 @@ namespace {
 		g_textureRingSize = textureRingSize;
 		g_waitableSwapChain = waitableSwapChain;
 		g_maxFrameLatency = 1;
+		g_leadAwareFrameWait = leadAwareFrameWait;
+		g_skipLatePresent = skipLatePresent;
 	}
 
 	void ApplyAutoVariant() {
@@ -132,17 +140,15 @@ namespace {
 			index = 0;
 		}
 
-		switch (((index % 7) + 7) % 7) {
+		switch (((index % 8) + 8) % 8) {
 		case 0: SetVariant("A-current", 0, true, 0.0, 5, 1, false); break;
-		// Recovery slot: 1.18.1.12 double-advanced LocalState to index 8 before E was measured.
-		case 1: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
+		case 1: SetVariant("B-candidate-lead2-buf3-ring3", 0, true, 2.0, 3, 3, false); break;
 		case 2: SetVariant("C-sync1-candidate-buf3-ring3", 1, true, 2.0, 3, 3, false); break;
-		// Recovery slot: 1.18.1.13 double-advanced LocalState to index 10 before E was measured.
-		case 3: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
-		case 4: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
+		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
+		case 4: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
 		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
-		// Recovery slot: 1.18.1.10 double-advanced LocalState to index 6 before E was measured.
-		case 6: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
+		case 6: SetVariant("G-waitable-buf3-ring3", 1, false, 0.0, 3, 3, true); break;
+		case 7: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		}
 
 		try {
@@ -167,6 +173,8 @@ namespace {
 		g_waitableSwapChain = false;
 		g_maxFrameLatency = 1;
 		g_textureRingSize = 1;
+		g_leadAwareFrameWait = false;
+		g_skipLatePresent = false;
 		g_loadedJsonConfig = false;
 	}
 
@@ -186,8 +194,10 @@ namespace {
 		g_waitableSwapChain = ReadIntSetting(L"xbox_lab_waitable_swapchain", g_waitableSwapChain ? 1 : 0) != 0;
 		g_maxFrameLatency = std::clamp(ReadIntSetting(L"xbox_lab_max_frame_latency", g_maxFrameLatency), 1, g_swapchainBuffers);
 		g_textureRingSize = std::clamp(ReadIntSetting(L"xbox_lab_texture_ring_size", g_textureRingSize), 1, 5);
+		g_leadAwareFrameWait = ReadIntSetting(L"xbox_lab_lead_aware_frame_wait", g_leadAwareFrameWait ? 1 : 0) != 0;
+		g_skipLatePresent = ReadIntSetting(L"xbox_lab_skip_late_present", g_skipLatePresent ? 1 : 0) != 0;
 
-		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d\n",
+		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d lead_aware_frame_wait=%d skip_late_present=%d\n",
 		            g_variantLabel.c_str(),
 		            g_presentSyncInterval,
 		            g_manualPresentWait ? 1 : 0,
@@ -198,7 +208,9 @@ namespace {
 		            g_noLockAroundPresent ? 1 : 0,
 		            g_waitableSwapChain ? 1 : 0,
 		            g_maxFrameLatency,
-		            g_textureRingSize);
+		            g_textureRingSize,
+		            g_leadAwareFrameWait ? 1 : 0,
+		            g_skipLatePresent ? 1 : 0);
 
 		LabLogger::Event("lab_pacing_config", LabPacingConfig::TelemetryFields());
 	}
@@ -227,6 +239,8 @@ namespace {
 			g_waitableSwapChain = config.value("waitable_swapchain", g_waitableSwapChain);
 			g_maxFrameLatency = config.value("max_frame_latency", g_maxFrameLatency);
 			g_textureRingSize = config.value("texture_ring_size", g_textureRingSize);
+			g_leadAwareFrameWait = config.value("lead_aware_frame_wait", g_leadAwareFrameWait);
+			g_skipLatePresent = config.value("skip_late_present", g_skipLatePresent);
 			g_loadedJsonConfig = config.value("loaded_json_config", g_loadedJsonConfig);
 			Utils::Logf("Reused pending lab pacing config from LocalState: variant=%s\n", g_variantLabel.c_str());
 			LabLogger::Event("lab_pacing_config_reuse", LabPacingConfig::TelemetryFields());
@@ -256,6 +270,8 @@ namespace {
 			config["waitable_swapchain"] = g_waitableSwapChain;
 			config["max_frame_latency"] = g_maxFrameLatency;
 			config["texture_ring_size"] = g_textureRingSize;
+			config["lead_aware_frame_wait"] = g_leadAwareFrameWait;
+			config["skip_late_present"] = g_skipLatePresent;
 			config["loaded_json_config"] = g_loadedJsonConfig;
 
 			std::ofstream out(Utils::WideToNarrowString(LocalPendingConfigPath()), std::ios::trunc);
@@ -361,6 +377,16 @@ int LabPacingConfig::TextureRingSize() {
 	return g_textureRingSize;
 }
 
+bool LabPacingConfig::LeadAwareFrameWait() {
+	Initialize();
+	return g_leadAwareFrameWait;
+}
+
+bool LabPacingConfig::SkipLatePresent() {
+	Initialize();
+	return g_skipLatePresent;
+}
+
 std::string LabPacingConfig::TelemetryFields() {
 	return "\"variant_label\":\"" + g_variantLabel + "\"" +
 		",\"present_interval\":" + std::to_string(g_presentSyncInterval) +
@@ -373,5 +399,7 @@ std::string LabPacingConfig::TelemetryFields() {
 		",\"waitable_swapchain\":" + std::to_string(g_waitableSwapChain ? 1 : 0) +
 		",\"max_frame_latency\":" + std::to_string(g_maxFrameLatency) +
 		",\"texture_ring_size\":" + std::to_string(g_textureRingSize) +
+		",\"lead_aware_frame_wait\":" + std::to_string(g_leadAwareFrameWait ? 1 : 0) +
+		",\"skip_late_present\":" + std::to_string(g_skipLatePresent ? 1 : 0) +
 		",\"config_source\":\"" + (g_loadedJsonConfig ? std::string("json") : std::string("auto-cycle")) + "\"";
 }

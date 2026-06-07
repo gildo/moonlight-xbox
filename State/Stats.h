@@ -44,13 +44,18 @@ typedef struct _VIDEO_STATS {
 	uint64_t totalPresentDxgiCallUs;
 	uint64_t totalPresentSubmitEarlyUs;
 	uint64_t totalPresentSubmitLateUs;
+	uint64_t totalPresentTargetSubmitEarlyUs;
+	uint64_t totalPresentTargetSubmitLateUs;
 	uint64_t totalPresentReturnToNextVblankUs;
 	double totalPresentDisplayMs;
 	double maxPresentDxgiCallMs;
 	double maxPresentTotalMs;
 	double maxPresentSubmitLateMs;
+	double maxPresentTargetSubmitLateMs;
 	uint32_t presentBlockedFullIntervalCount;
 	uint32_t presentSubmitLateCount;
+	uint32_t presentTargetSubmitLateCount;
+	uint32_t latePresentSkipCount;
 	uint32_t missedPresentStreakMax;
 	uint32_t lastRtt;
 	uint32_t lastRttVariance;
@@ -84,8 +89,11 @@ namespace moonlight_xbox_dx
 		                       double presentTotalMs,
 		                       double presentSubmitEarlyMs,
 		                       double presentSubmitLateMs,
+		                       double presentTargetSubmitEarlyMs,
+		                       double presentTargetSubmitLateMs,
 		                       double presentReturnToNextVblankMs,
-		                       bool hitDeadline);
+		                       bool hitDeadline,
+		                       bool skippedLatePresent);
 
 	private:
 		void addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_STATS& dst);
@@ -105,5 +113,7 @@ namespace moonlight_xbox_dx
 		std::vector<double>                  m_presentTotalWindow;
 		std::vector<double>                  m_presentSubmitEarlyWindow;
 		std::vector<double>                  m_presentSubmitLateWindow;
+		std::vector<double>                  m_presentTargetSubmitEarlyWindow;
+		std::vector<double>                  m_presentTargetSubmitLateWindow;
 	};
 }

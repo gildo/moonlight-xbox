@@ -71,6 +71,8 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 		double presentTotalP95 = Percentile(m_presentTotalWindow, 95.0);
 		double presentSubmitEarlyP95 = Percentile(m_presentSubmitEarlyWindow, 95.0);
 		double presentSubmitLateP95 = Percentile(m_presentSubmitLateWindow, 95.0);
+		double presentTargetSubmitEarlyP95 = Percentile(m_presentTargetSubmitEarlyWindow, 95.0);
+		double presentTargetSubmitLateP95 = Percentile(m_presentTargetSubmitLateWindow, 95.0);
 		LabLogger::Telemetry(
 			"\"received_frames\":" + std::to_string(telemetryStats.receivedFrames) +
 			",\"decoded_frames\":" + std::to_string(telemetryStats.decodedFrames) +
@@ -102,9 +104,16 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 			",\"avg_present_submit_late_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentSubmitLateUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
 			",\"p95_present_submit_late_ms\":" + std::to_string(presentSubmitLateP95) +
 			",\"max_present_submit_late_ms\":" + std::to_string(telemetryStats.maxPresentSubmitLateMs) +
+			",\"avg_present_target_submit_early_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentTargetSubmitEarlyUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
+			",\"p95_present_target_submit_early_ms\":" + std::to_string(presentTargetSubmitEarlyP95) +
+			",\"avg_present_target_submit_late_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentTargetSubmitLateUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
+			",\"p95_present_target_submit_late_ms\":" + std::to_string(presentTargetSubmitLateP95) +
+			",\"max_present_target_submit_late_ms\":" + std::to_string(telemetryStats.maxPresentTargetSubmitLateMs) +
 			",\"avg_present_return_to_next_vblank_ms\":" + std::to_string(telemetryStats.renderedFrames ? (double)telemetryStats.totalPresentReturnToNextVblankUs / 1000.0 / telemetryStats.renderedFrames : 0.0) +
 			",\"present_blocked_full_interval_count\":" + std::to_string(telemetryStats.presentBlockedFullIntervalCount) +
 			",\"present_submit_late_count\":" + std::to_string(telemetryStats.presentSubmitLateCount) +
+			",\"present_target_submit_late_count\":" + std::to_string(telemetryStats.presentTargetSubmitLateCount) +
+			",\"late_present_skip_count\":" + std::to_string(telemetryStats.latePresentSkipCount) +
 			",\"missed_present_streak_max\":" + std::to_string(telemetryStats.missedPresentStreakMax) +
 			"," + LabPacingConfig::TelemetryFields() +
 			",\"rtt_ms\":" + std::to_string(telemetryStats.lastRtt) +
@@ -118,6 +127,8 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 		m_presentTotalWindow.clear();
 		m_presentSubmitEarlyWindow.clear();
 		m_presentSubmitLateWindow.clear();
+		m_presentTargetSubmitEarlyWindow.clear();
+		m_presentTargetSubmitLateWindow.clear();
 	}
 
 	return shouldUpdate;
@@ -212,8 +223,11 @@ void Stats::SubmitRenderStats(double preWaitTimeMs,
                               double presentTotalMs,
                               double presentSubmitEarlyMs,
                               double presentSubmitLateMs,
+                              double presentTargetSubmitEarlyMs,
+                              double presentTargetSubmitLateMs,
                               double presentReturnToNextVblankMs,
-                              bool hitDeadline) {
+                              bool hitDeadline,
+                              bool skippedLatePresent) {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_ActiveWndVideoStats.totalRenderTimeUs += static_cast<uint64_t>(renderTimeMs * 1000);
 	m_ActiveWndVideoStats.renderedFrames++;
@@ -235,20 +249,31 @@ void Stats::SubmitRenderStats(double preWaitTimeMs,
 	m_ActiveWndVideoStats.totalPresentDxgiCallUs += static_cast<uint64_t>(presentDxgiCallMs * 1000);
 	m_ActiveWndVideoStats.totalPresentSubmitEarlyUs += static_cast<uint64_t>(std::max(0.0, presentSubmitEarlyMs) * 1000);
 	m_ActiveWndVideoStats.totalPresentSubmitLateUs += static_cast<uint64_t>(std::max(0.0, presentSubmitLateMs) * 1000);
+	m_ActiveWndVideoStats.totalPresentTargetSubmitEarlyUs += static_cast<uint64_t>(std::max(0.0, presentTargetSubmitEarlyMs) * 1000);
+	m_ActiveWndVideoStats.totalPresentTargetSubmitLateUs += static_cast<uint64_t>(std::max(0.0, presentTargetSubmitLateMs) * 1000);
 	m_ActiveWndVideoStats.totalPresentReturnToNextVblankUs += static_cast<uint64_t>(std::max(0.0, presentReturnToNextVblankMs) * 1000);
 	m_ActiveWndVideoStats.maxPresentDxgiCallMs = std::max(m_ActiveWndVideoStats.maxPresentDxgiCallMs, presentDxgiCallMs);
 	m_ActiveWndVideoStats.maxPresentTotalMs = std::max(m_ActiveWndVideoStats.maxPresentTotalMs, presentTotalMs);
 	m_ActiveWndVideoStats.maxPresentSubmitLateMs = std::max(m_ActiveWndVideoStats.maxPresentSubmitLateMs, presentSubmitLateMs);
+	m_ActiveWndVideoStats.maxPresentTargetSubmitLateMs = std::max(m_ActiveWndVideoStats.maxPresentTargetSubmitLateMs, presentTargetSubmitLateMs);
 	if (presentDxgiCallMs > 10.0) {
 		m_ActiveWndVideoStats.presentBlockedFullIntervalCount++;
 	}
 	if (presentSubmitLateMs > 0.0) {
 		m_ActiveWndVideoStats.presentSubmitLateCount++;
 	}
+	if (presentTargetSubmitLateMs > 0.0) {
+		m_ActiveWndVideoStats.presentTargetSubmitLateCount++;
+	}
+	if (skippedLatePresent) {
+		m_ActiveWndVideoStats.latePresentSkipCount++;
+	}
 	m_presentDxgiCallWindow.push_back(presentDxgiCallMs);
 	m_presentTotalWindow.push_back(presentTotalMs);
 	m_presentSubmitEarlyWindow.push_back(std::max(0.0, presentSubmitEarlyMs));
 	m_presentSubmitLateWindow.push_back(std::max(0.0, presentSubmitLateMs));
+	m_presentTargetSubmitEarlyWindow.push_back(std::max(0.0, presentTargetSubmitEarlyMs));
+	m_presentTargetSubmitLateWindow.push_back(std::max(0.0, presentTargetSubmitLateMs));
 }
 
 /// private methods
@@ -273,13 +298,18 @@ void Stats::addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_ST
 	dst.totalPresentDxgiCallUs += src.totalPresentDxgiCallUs;
 	dst.totalPresentSubmitEarlyUs += src.totalPresentSubmitEarlyUs;
 	dst.totalPresentSubmitLateUs += src.totalPresentSubmitLateUs;
+	dst.totalPresentTargetSubmitEarlyUs += src.totalPresentTargetSubmitEarlyUs;
+	dst.totalPresentTargetSubmitLateUs += src.totalPresentTargetSubmitLateUs;
 	dst.totalPresentReturnToNextVblankUs += src.totalPresentReturnToNextVblankUs;
 	dst.totalPresentDisplayMs += src.totalPresentDisplayMs;
 	dst.maxPresentDxgiCallMs = std::max(dst.maxPresentDxgiCallMs, src.maxPresentDxgiCallMs);
 	dst.maxPresentTotalMs = std::max(dst.maxPresentTotalMs, src.maxPresentTotalMs);
 	dst.maxPresentSubmitLateMs = std::max(dst.maxPresentSubmitLateMs, src.maxPresentSubmitLateMs);
+	dst.maxPresentTargetSubmitLateMs = std::max(dst.maxPresentTargetSubmitLateMs, src.maxPresentTargetSubmitLateMs);
 	dst.presentBlockedFullIntervalCount += src.presentBlockedFullIntervalCount;
 	dst.presentSubmitLateCount += src.presentSubmitLateCount;
+	dst.presentTargetSubmitLateCount += src.presentTargetSubmitLateCount;
+	dst.latePresentSkipCount += src.latePresentSkipCount;
 	dst.missedPresentStreakMax = std::max(dst.missedPresentStreakMax, src.missedPresentStreakMax);
 
 	if (dst.minHostProcessingLatency == 0) {

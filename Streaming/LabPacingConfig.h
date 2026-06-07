@@ -38,6 +38,8 @@ namespace LabPacingConfig {
 	bool WaitableSwapChain();
 	int MaxFrameLatency();
 	int TextureRingSize();
+	bool LeadAwareFrameWait();
+	bool SkipLatePresent();
 	std::string TelemetryFields();
 }
 }
