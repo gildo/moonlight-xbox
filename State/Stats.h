@@ -56,6 +56,7 @@ typedef struct _VIDEO_STATS {
 	uint32_t presentSubmitLateCount;
 	uint32_t presentTargetSubmitLateCount;
 	uint32_t latePresentSkipCount;
+	uint32_t retainedFramePresentCount;
 	uint32_t missedPresentStreakMax;
 	uint32_t lastRtt;
 	uint32_t lastRttVariance;
@@ -93,7 +94,8 @@ namespace moonlight_xbox_dx
 		                       double presentTargetSubmitLateMs,
 		                       double presentReturnToNextVblankMs,
 		                       bool hitDeadline,
-		                       bool skippedLatePresent);
+		                       bool skippedLatePresent,
+		                       bool retainedFramePresented);
 
 	private:
 		void addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_STATS& dst);

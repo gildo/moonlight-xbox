@@ -30,6 +30,8 @@ namespace {
 	double g_latePresentSkipGraceMs = 0.0;
 	double g_renderSafetyMs = 1.5;
 	bool g_adaptivePacingBudget = false;
+	bool g_retainedFrameFallback = false;
+	double g_retainedFrameFallbackMarginMs = 0.0;
 	bool g_loadedJsonConfig = false;
 	bool g_preparedForPendingStream = false;
 	ULONGLONG g_lastStreamConfigMs = 0;
@@ -117,6 +119,8 @@ namespace {
 			g_latePresentSkipGraceMs = config.value("late_present_skip_grace_ms", g_latePresentSkipGraceMs);
 			g_renderSafetyMs = config.value("render_safety_ms", g_renderSafetyMs);
 			g_adaptivePacingBudget = config.value("adaptive_pacing_budget", g_adaptivePacingBudget);
+			g_retainedFrameFallback = config.value("retained_frame_fallback", g_retainedFrameFallback);
+			g_retainedFrameFallbackMarginMs = config.value("retained_frame_fallback_margin_ms", g_retainedFrameFallbackMarginMs);
 			Utils::Logf("Loaded lab pacing config from LocalState moonlight-lab-pacing.json\n");
 			return true;
 		}
@@ -153,6 +157,8 @@ namespace {
 	                double latePresentSkipGraceMs = 0.0,
 	                double renderSafetyMs = 1.5,
 	                bool adaptivePacingBudget = false,
+	                bool retainedFrameFallback = false,
+	                double retainedFrameFallbackMarginMs = 0.0,
 	                bool noLockAroundPresent = ML_LAB_NO_LOCK_PRESENT_DEFAULT != 0) {
 		g_variantLabel = label;
 		g_presentSyncInterval = presentSyncInterval;
@@ -169,6 +175,8 @@ namespace {
 		g_latePresentSkipGraceMs = latePresentSkipGraceMs;
 		g_renderSafetyMs = renderSafetyMs;
 		g_adaptivePacingBudget = adaptivePacingBudget;
+		g_retainedFrameFallback = retainedFrameFallback;
+		g_retainedFrameFallbackMarginMs = retainedFrameFallbackMarginMs;
 	}
 
 	void ApplyAutoVariant() {
@@ -190,7 +198,7 @@ namespace {
 		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
 		case 4: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
 		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
-		case 6: SetVariant("J-lead2-adaptivebudget-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true); break;
+		case 6: SetVariant("K-retaineddeadline-adaptivebudget-grace6-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5, true, true, 2.5); break;
 		case 7: SetVariant("I-lead2-targetwait-grace6-safety25-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5); break;
 		case 8: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		}
@@ -222,6 +230,8 @@ namespace {
 		g_latePresentSkipGraceMs = 0.0;
 		g_renderSafetyMs = 1.5;
 		g_adaptivePacingBudget = false;
+		g_retainedFrameFallback = false;
+		g_retainedFrameFallbackMarginMs = 0.0;
 		g_loadedJsonConfig = false;
 	}
 
@@ -246,8 +256,10 @@ namespace {
 		g_latePresentSkipGraceMs = std::clamp(ReadDoubleSetting(L"xbox_lab_late_present_skip_grace_ms", g_latePresentSkipGraceMs), 0.0, 16.0);
 		g_renderSafetyMs = std::clamp(ReadDoubleSetting(L"xbox_lab_render_safety_ms", g_renderSafetyMs), 0.5, 8.0);
 		g_adaptivePacingBudget = ReadIntSetting(L"xbox_lab_adaptive_pacing_budget", g_adaptivePacingBudget ? 1 : 0) != 0;
+		g_retainedFrameFallback = ReadIntSetting(L"xbox_lab_retained_frame_fallback", g_retainedFrameFallback ? 1 : 0) != 0;
+		g_retainedFrameFallbackMarginMs = std::clamp(ReadDoubleSetting(L"xbox_lab_retained_frame_fallback_margin_ms", g_retainedFrameFallbackMarginMs), 0.0, 8.0);
 
-		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d lead_aware_frame_wait=%d skip_late_present=%d late_present_skip_grace_ms=%.3f render_safety_ms=%.3f adaptive_pacing_budget=%d\n",
+		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d lead_aware_frame_wait=%d skip_late_present=%d late_present_skip_grace_ms=%.3f render_safety_ms=%.3f adaptive_pacing_budget=%d retained_frame_fallback=%d retained_frame_fallback_margin_ms=%.3f\n",
 		            g_variantLabel.c_str(),
 		            g_presentSyncInterval,
 		            g_manualPresentWait ? 1 : 0,
@@ -263,7 +275,9 @@ namespace {
 		            g_skipLatePresent ? 1 : 0,
 		            g_latePresentSkipGraceMs,
 		            g_renderSafetyMs,
-		            g_adaptivePacingBudget ? 1 : 0);
+		            g_adaptivePacingBudget ? 1 : 0,
+		            g_retainedFrameFallback ? 1 : 0,
+		            g_retainedFrameFallbackMarginMs);
 
 		LabLogger::Event("lab_pacing_config", LabPacingConfig::TelemetryFields());
 	}
@@ -297,6 +311,8 @@ namespace {
 			g_latePresentSkipGraceMs = config.value("late_present_skip_grace_ms", g_latePresentSkipGraceMs);
 			g_renderSafetyMs = config.value("render_safety_ms", g_renderSafetyMs);
 			g_adaptivePacingBudget = config.value("adaptive_pacing_budget", g_adaptivePacingBudget);
+			g_retainedFrameFallback = config.value("retained_frame_fallback", g_retainedFrameFallback);
+			g_retainedFrameFallbackMarginMs = config.value("retained_frame_fallback_margin_ms", g_retainedFrameFallbackMarginMs);
 			g_loadedJsonConfig = config.value("loaded_json_config", g_loadedJsonConfig);
 			Utils::Logf("Reused pending lab pacing config from LocalState: variant=%s\n", g_variantLabel.c_str());
 			LabLogger::Event("lab_pacing_config_reuse", LabPacingConfig::TelemetryFields());
@@ -331,6 +347,8 @@ namespace {
 			config["late_present_skip_grace_ms"] = g_latePresentSkipGraceMs;
 			config["render_safety_ms"] = g_renderSafetyMs;
 			config["adaptive_pacing_budget"] = g_adaptivePacingBudget;
+			config["retained_frame_fallback"] = g_retainedFrameFallback;
+			config["retained_frame_fallback_margin_ms"] = g_retainedFrameFallbackMarginMs;
 			config["loaded_json_config"] = g_loadedJsonConfig;
 
 			std::ofstream out(Utils::WideToNarrowString(LocalPendingConfigPath()), std::ios::trunc);
@@ -473,6 +491,16 @@ bool LabPacingConfig::AdaptivePacingBudget() {
 	return g_adaptivePacingBudget;
 }
 
+bool LabPacingConfig::RetainedFrameFallback() {
+	Initialize();
+	return g_retainedFrameFallback;
+}
+
+double LabPacingConfig::RetainedFrameFallbackMarginMs() {
+	Initialize();
+	return g_retainedFrameFallbackMarginMs;
+}
+
 std::string LabPacingConfig::TelemetryFields() {
 	return "\"variant_label\":\"" + g_variantLabel + "\"" +
 		",\"present_interval\":" + std::to_string(g_presentSyncInterval) +
@@ -490,5 +518,7 @@ std::string LabPacingConfig::TelemetryFields() {
 		",\"late_present_skip_grace_ms\":" + std::to_string(g_latePresentSkipGraceMs) +
 		",\"render_safety_ms\":" + std::to_string(g_renderSafetyMs) +
 		",\"adaptive_pacing_budget\":" + std::to_string(g_adaptivePacingBudget ? 1 : 0) +
+		",\"retained_frame_fallback\":" + std::to_string(g_retainedFrameFallback ? 1 : 0) +
+		",\"retained_frame_fallback_margin_ms\":" + std::to_string(g_retainedFrameFallbackMarginMs) +
 		",\"config_source\":\"" + (g_loadedJsonConfig ? std::string("json") : std::string("auto-cycle")) + "\"";
 }

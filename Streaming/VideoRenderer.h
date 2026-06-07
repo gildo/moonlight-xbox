@@ -48,11 +48,13 @@ namespace moonlight_xbox_dx
 		void SetHDR(bool enabled);
 		void Stop();
 		ID3D11Texture2D* GenerateTexture();
+		bool RenderRetained();
 
 
 	private:
 		bool setupVideoTexture(D3D11_TEXTURE2D_DESC frameDesc);
 		void setupVertexBuffer(D3D11_TEXTURE2D_DESC frameDesc);
+		bool drawVideoTexture(UINT srvIndex);
 		void getFramePremultipliedCscConstants(const AVFrame* frame, std::array<float, 9> &cscMatrix, std::array<float, 3> &offsets);
 		void getFrameChromaCositingOffsets(const AVFrame* frame, std::array<float, 2> &chromaOffsets);
 		bool hasFrameFormatChanged(const AVFrame* frame);
@@ -75,6 +77,8 @@ namespace moonlight_xbox_dx
 		std::array<std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>, 5> m_VideoTextureResourceViews;
 		UINT m_VideoTextureRingIndex = 0;
 		UINT m_VideoTextureRingSize = 1;
+		UINT m_LastVideoTextureIndex = 0;
+		bool m_HasRetainedVideoTexture = false;
 
 		// Variables used with the rendering loop.
 		DXGI_HDR_METADATA_HDR10 m_lastHdr10;

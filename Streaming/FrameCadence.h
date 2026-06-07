@@ -31,6 +31,10 @@ class FrameCadence {
 	//   2+ -> drop some incoming frames (e.g. 120 fps stream on 60 Hz display)
 	int decideAdvanceCount();
 
+	// Main thread only. If the renderer intentionally repeats the retained frame
+	// instead of consuming a frame, restore the cadence debt from decideAdvanceCount().
+	void deferAdvanceCount(int count);
+
 	// Lock-free accessors.
 	double displayHz() const;
 	double displayPeriodMs() const;

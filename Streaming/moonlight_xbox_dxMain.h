@@ -47,7 +47,7 @@ namespace moonlight_xbox_dx
 		bool TryBeginTeardown();
 		void ProcessInput();
 		void Update();
-		bool Render();
+		bool Render(int64_t retainedFallbackTargetQpc = 0);
 		void RenderImGui();
 
 		// Cached pointer to device resources.

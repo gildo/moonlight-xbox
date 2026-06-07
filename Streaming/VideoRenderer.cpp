@@ -92,6 +92,51 @@ static inline std::vector<DXGI_FORMAT> getVideoTextureSRVFormats(DXGI_FORMAT fmt
 	}
 }
 
+bool VideoRenderer::drawVideoTexture(UINT srvIndex) {
+	auto *ctx = m_deviceResources->GetD3DDeviceContext();
+	if (srvIndex >= m_VideoTextureResourceViews.size() ||
+	    !m_VideoTextureResourceViews[srvIndex][0] ||
+	    !m_VideoTextureResourceViews[srvIndex][1] ||
+	    !m_VideoVertexBuffer ||
+	    !m_cscConstantBuffer) {
+		return false;
+	}
+
+	// Clear the back buffer
+	ID3D11RenderTargetView* renderTarget[] = { m_deviceResources->GetBackBufferRenderTargetView() };
+	ctx->ClearRenderTargetView(renderTarget[0], Colors::Black);
+
+	// Bind the back buffer. This needs to be done each time,
+	// because the render target view will be unbound by Present().
+	ctx->OMSetRenderTargets(1, renderTarget, nullptr);
+
+	// Setup shader
+	ctx->PSSetSamplers(0, 1, m_samplerState.GetAddressOf());
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	ctx->IASetInputLayout(m_inputLayout.Get());
+	ctx->VSSetShader(m_vertexShader.Get(), nullptr, 0);
+	ctx->PSSetShader(m_pixelShaderYUV420.Get(), nullptr, 0);
+
+	UINT stride = sizeof(VERTEX);
+	UINT offset = 0;
+	ctx->IASetVertexBuffers(0, 1, m_VideoVertexBuffer.GetAddressOf(), &stride, &offset);
+	ctx->IASetIndexBuffer(m_indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
+
+	// Bind SRVs for this frame
+	ID3D11ShaderResourceView* frameSrvs[] = { m_VideoTextureResourceViews[srvIndex][0].Get(), m_VideoTextureResourceViews[srvIndex][1].Get() };
+	ctx->PSSetShaderResources(0, 2, frameSrvs);
+	ctx->PSSetConstantBuffers(0, 1, m_cscConstantBuffer.GetAddressOf());
+
+	// Draw the video
+	ctx->DrawIndexed(6, 0, 0);
+
+	// Unbind SRVs for this frame
+	ID3D11ShaderResourceView* nullSrvs[2] = {};
+	ctx->PSSetShaderResources(0, 2, nullSrvs);
+
+	return true;
+}
+
 bool renderedOneFrame = false;
 // Renders one frame using the vertex and pixel shaders.
 bool VideoRenderer::Render(AVFrame *frame) {
@@ -101,15 +146,6 @@ bool VideoRenderer::Render(AVFrame *frame) {
 	}
 
 	auto *ctx = m_deviceResources->GetD3DDeviceContext();
-	auto *dev = m_deviceResources->GetD3DDevice();
-
-	// Clear the back buffer
-	ID3D11RenderTargetView* renderTarget[] = { m_deviceResources->GetBackBufferRenderTargetView() };
-	ctx->ClearRenderTargetView(renderTarget[0], Colors::Black);
-
-	// Bind the back buffer. This needs to be done each time,
-	// because the render target view will be unbound by Present().
-	ctx->OMSetRenderTargets(1, renderTarget, nullptr);
 
 	ID3D11Texture2D *ffmpegTexture = (ID3D11Texture2D *)(frame->data[0]);
 	if (!ffmpegTexture) {
@@ -130,34 +166,17 @@ bool VideoRenderer::Render(AVFrame *frame) {
 	                            (ID3D11Resource *)frame->data[0], (int)(intptr_t)frame->data[1],
 	                            nullptr, D3D11_COPY_DISCARD);
 
-	// Setup shader
-	ctx->PSSetSamplers(0, 1, m_samplerState.GetAddressOf());
-	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	ctx->IASetInputLayout(m_inputLayout.Get());
-	ctx->VSSetShader(m_vertexShader.Get(), nullptr, 0);
-	ctx->PSSetShader(m_pixelShaderYUV420.Get(), nullptr, 0);
-
 	if (hasChanged) {
 		setupVertexBuffer(ffmpegDesc);
 		bindColorConversion(frame, ffmpegDesc);
 	}
 
-	UINT stride = sizeof(VERTEX);
-	UINT offset = 0;
-	ctx->IASetVertexBuffers(0, 1, m_VideoVertexBuffer.GetAddressOf(), &stride, &offset);
-	ctx->IASetIndexBuffer(m_indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
+	m_LastVideoTextureIndex = srvIndex;
+	m_HasRetainedVideoTexture = true;
 
-	// Bind SRVs for this frame
-	ID3D11ShaderResourceView* frameSrvs[] = { m_VideoTextureResourceViews[srvIndex][0].Get(), m_VideoTextureResourceViews[srvIndex][1].Get() };
-	ctx->PSSetShaderResources(0, 2, frameSrvs);
-	ctx->PSSetConstantBuffers(0, 1, m_cscConstantBuffer.GetAddressOf());
-
-	// Draw the video
-	ctx->DrawIndexed(6, 0, 0);
-
-	// Unbind SRVs for this frame
-	ID3D11ShaderResourceView* nullSrvs[2] = {};
-	ctx->PSSetShaderResources(0, 2, nullSrvs);
+	if (!drawVideoTexture(srvIndex)) {
+		return false;
+	}
 
 	if (frame->color_trc != m_LastColorTrc) {
 		DXGI_COLOR_SPACE_TYPE colorspace = {};
@@ -183,6 +202,19 @@ bool VideoRenderer::Render(AVFrame *frame) {
 	}
 
 	return true;
+}
+
+bool VideoRenderer::RenderRetained() {
+	if (!m_HasRetainedVideoTexture) {
+		return false;
+	}
+
+	// Loading is asynchronous. Only draw geometry after it's loaded.
+	if (!m_loadingComplete.load(std::memory_order_acquire) && !m_loadingSuccessful.load(std::memory_order_acquire)) {
+		return true;
+	}
+
+	return drawVideoTexture(m_LastVideoTextureIndex);
 }
 
 void VideoRenderer::CreateDeviceDependentResources()
@@ -314,6 +346,7 @@ void VideoRenderer::ReleaseDeviceDependentResources()
 			srv.Reset();
 		}
 	}
+	m_HasRetainedVideoTexture = false;
 }
 
 void VideoRenderer::scaleSourceToDestinationSurface(IRECT* src, IRECT* dst)
@@ -362,6 +395,8 @@ bool VideoRenderer::setupVideoTexture(D3D11_TEXTURE2D_DESC frameDesc)
 
 	m_VideoTextureRingSize = static_cast<UINT>(LabPacingConfig::TextureRingSize());
 	m_VideoTextureRingIndex = 0;
+	m_LastVideoTextureIndex = 0;
+	m_HasRetainedVideoTexture = false;
 	for (auto& texture : m_VideoTextures) {
 		texture.Reset();
 	}

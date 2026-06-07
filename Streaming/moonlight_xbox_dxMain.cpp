@@ -266,10 +266,14 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				Update();
 
 				bool rendered = false;
+				int64_t retainedFallbackTarget = 0;
+				if (LabPacingConfig::RetainedFrameFallback()) {
+					retainedFallbackTarget = presentWaitTarget - MsToQpc(LabPacingConfig::RetainedFrameFallbackMarginMs());
+				}
 				{
 					// ffmpeg and Render both use the same D3D context
 					auto guard = FFMpegDecoder::Lock();
-					rendered = Render();
+					rendered = Render(retainedFallbackTarget);
 					t2 = QpcNow();
 				}
 
@@ -317,6 +321,7 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 
 				// Graph frametime only for new frames
 				bool isRepeatFrame = true;
+				bool retainedFramePresented = Pacer::instance().lastRenderUsedRetained();
 				int64_t currentFramePts = Pacer::instance().getCurrentFramePts();
 				if (!skippedLatePresent && currentFramePts != lastFramePts) {
 					if (lastPresentTime > 0) {
@@ -352,12 +357,14 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				// on the next loop. The adaptive candidate accounts for lock wait before
 				// Present(), because taking that lock after the target caused late submits.
 				double deadlineWindowMs = std::max(0.0, QpcToMs(deadline - t0));
-				double clampedRenderMs = std::clamp(renderMs, 0.0, deadlineWindowMs);
-				double renderAlpha = (clampedRenderMs > ewmaRenderMs) ? alphaUp : alphaDown;
-				if (!presentDeadlineHit) {
-					renderAlpha *= 2.0;
+				if (!retainedFramePresented) {
+					double clampedRenderMs = std::clamp(renderMs, 0.0, deadlineWindowMs);
+					double renderAlpha = (clampedRenderMs > ewmaRenderMs) ? alphaUp : alphaDown;
+					if (!presentDeadlineHit) {
+						renderAlpha *= 2.0;
+					}
+					ewmaRenderMs = (clampedRenderMs * renderAlpha) + (ewmaRenderMs * (1.0 - renderAlpha));
 				}
-				ewmaRenderMs = (clampedRenderMs * renderAlpha) + (ewmaRenderMs * (1.0 - renderAlpha));
 
 				double clampedLockMs = std::clamp(presentLockWaitMs, 0.0, 4.0);
 				double lockAlpha = (clampedLockMs > ewmaPresentLockMs) ? alphaUp : alphaDown;
@@ -378,13 +385,15 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				                                                 presentTargetSubmitLateMs,
 				                                                 presentReturnToNextVblankMs,
 				                                                 presentDeadlineHit,
-				                                                 skippedLatePresent);
+				                                                 skippedLatePresent,
+				                                                 retainedFramePresented);
 
-				FQLog("render loop %.3fms %s%s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms Target %.3fms WaitTarget %.3fms PreWait %.3fms (max %.3fms safety %.3fms lockBudget %.3fms) + Render %.3fms (avg %.3f) + WaitPresent %.3fms + Lock %.3fms (avg %.3f) + PresentDxgi %.3fms + PresentTotal %.3fms early %.3fms late %.3fms targetLate %.3fms waitLate %.3fms)\n",
+				FQLog("render loop %.3fms %s%s%s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms Target %.3fms WaitTarget %.3fms PreWait %.3fms (max %.3fms safety %.3fms lockBudget %.3fms) + Render %.3fms (avg %.3f) + WaitPresent %.3fms + Lock %.3fms (avg %.3f) + PresentDxgi %.3fms + PresentTotal %.3fms early %.3fms late %.3fms targetLate %.3fms waitLate %.3fms)\n",
 				      QpcToMs(t4 - t0),                             // loop time
 				      presentDeadlineHit ? " " : "M",               // missed deadline?
 				      isRepeatFrame ? "R" : " ",                    // repeated frame?
 				      skippedLatePresent ? "S" : " ",               // skipped a late present?
+				      retainedFramePresented ? "T" : " ",           // retained texture frame?
 				      preWaitMs > maxWaitMs + renderSafetyMs ? "W" : " ", // we waited too long for a frame (including safety)
 				      (double)currentFramePts / 90000.0,            // host's timestamp (in seconds)
 				      frametimeMs,                                  // effective client frametime not counting repeated frames
@@ -767,7 +776,7 @@ void moonlight_xbox_dxMain::SendGamepadArrival(GamepadState &state) {
 
 // Renders the current frame according to the current application state.
 // Returns true if the frame was rendered and is ready to be displayed.
-bool moonlight_xbox_dxMain::Render() {
+bool moonlight_xbox_dxMain::Render(int64_t retainedFallbackTargetQpc) {
 	// Don't try to render anything before the first Update.
 	if (m_timer.GetFrameCount() == 0) {
 		return false;
@@ -783,7 +792,7 @@ bool moonlight_xbox_dxMain::Render() {
 		ImGui::NewFrame();
 	}
 
-	bool shouldPresent = Pacer::instance().renderOnMainThread(m_sceneRenderer);
+	bool shouldPresent = Pacer::instance().renderOnMainThread(m_sceneRenderer, retainedFallbackTargetQpc);
 	if (shouldPresent) {
 		// avoid useless rendering without an underlying frame change
 		m_LogRenderer->Render();

@@ -240,13 +240,14 @@ void Pacer::waitForFrame(double timeoutMs) {
 }
 
 // called by render thread
-bool Pacer::renderOnMainThread(std::shared_ptr<VideoRenderer> &sceneRenderer) {
+bool Pacer::renderOnMainThread(std::shared_ptr<VideoRenderer> &sceneRenderer, int64_t retainedFallbackTargetQpc) {
 	if (!running()) return false;
 
+	m_LastRenderUsedRetained = false;
 	if (m_FramePacingImmediate.load(std::memory_order_acquire)) {
 		return renderModeImmediate(sceneRenderer);
 	} else {
-		return renderModeDisplayLocked(sceneRenderer);
+		return renderModeDisplayLocked(sceneRenderer, retainedFallbackTargetQpc);
 	}
 }
 
@@ -255,6 +256,7 @@ bool Pacer::renderOnMainThread(std::shared_ptr<VideoRenderer> &sceneRenderer) {
 // Pros: lowest latency, output framerate matches input framerate
 // Cons: only works well on Xbox Series for some reason
 bool Pacer::renderModeImmediate(std::shared_ptr<VideoRenderer> &sceneRenderer) {
+	m_LastRenderUsedRetained = false;
 	AVFrame *newFrame = FrameQueue::instance().dequeue();
 	if (!newFrame) {
 		return false; // no frame, don't Present()
@@ -302,9 +304,12 @@ bool Pacer::renderModeImmediate(std::shared_ptr<VideoRenderer> &sceneRenderer) {
 //       May do a better job with e.g. 24fps needing 3:2 pulldown
 // Cons: higher latency
 //       more difficult to control queue size, requires additional frame drop logic
-bool Pacer::renderModeDisplayLocked(std::shared_ptr<VideoRenderer> &sceneRenderer) {
+bool Pacer::renderModeDisplayLocked(std::shared_ptr<VideoRenderer> &sceneRenderer, int64_t retainedFallbackTargetQpc) {
+	m_LastRenderUsedRetained = false;
+
 	// Consume frame(s) according to cadence
-	int advanceCount = m_FrameCadence.decideAdvanceCount();
+	int cadenceAdvanceCount = m_FrameCadence.decideAdvanceCount();
+	int advanceCount = cadenceAdvanceCount;
 
 	// if the queue has too many frames in it, break the cadence and render or drop one extra
 	int queueDepth = FrameQueue::instance().count();
@@ -312,11 +317,26 @@ bool Pacer::renderModeDisplayLocked(std::shared_ptr<VideoRenderer> &sceneRendere
 		advanceCount++;
 	}
 
+	if (LabPacingConfig::RetainedFrameFallback() &&
+	    m_CurrentFrame &&
+	    retainedFallbackTargetQpc > 0 &&
+	    QpcNow() >= retainedFallbackTargetQpc &&
+	    sceneRenderer->RenderRetained()) {
+		m_FrameCadence.deferAdvanceCount(cadenceAdvanceCount);
+		m_LastRenderUsedRetained = true;
+		FQLog("> Retained frame rendered [pts: %.3f] [%.2ffps] [%.2fhz] [advanceCount %d] [queued %d]\n",
+		      m_CurrentFrame->pts / 90.0, m_FrameCadence.streamFps(), m_FrameCadence.displayHz(),
+		      advanceCount, queueDepth);
+		return true;
+	}
+
+	bool consumedNewFrame = false;
 	for (int i = 0; i < advanceCount; ++i) {
 		AVFrame *newFrame = FrameQueue::instance().dequeue();
 		if (!newFrame) {
 			break;
 		}
+		consumedNewFrame = true;
 
 		if (m_CurrentFrame) {
 			if (i > 0) {
@@ -334,6 +354,15 @@ bool Pacer::renderModeDisplayLocked(std::shared_ptr<VideoRenderer> &sceneRendere
 	}
 
 	int64_t beforeRenderQpc = QpcNow();
+
+	if (!consumedNewFrame && sceneRenderer->RenderRetained()) {
+		m_FrameCadence.deferAdvanceCount(cadenceAdvanceCount);
+		m_LastRenderUsedRetained = true;
+		FQLog("> Retained frame rendered [pts: %.3f] [%.2ffps] [%.2fhz] [advanceCount %d] [queued %d]\n",
+		      m_CurrentFrame->pts / 90.0, m_FrameCadence.streamFps(), m_FrameCadence.displayHz(),
+		      advanceCount, queueDepth);
+		return true;
+	}
 
 	// Render it
 	FQLog("> Frame rendered [pts: %.3f] [%.2ffps] [%.2fhz] [advanceCount %d] [queued %d]\n",

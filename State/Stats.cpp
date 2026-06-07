@@ -149,6 +149,7 @@ bool Stats::ShouldUpdateDisplay(DX::StepTimer const& timer, bool isVisible, char
 			",\"present_submit_late_count\":" + std::to_string(telemetryStats.presentSubmitLateCount) +
 			",\"present_target_submit_late_count\":" + std::to_string(telemetryStats.presentTargetSubmitLateCount) +
 			",\"late_present_skip_count\":" + std::to_string(telemetryStats.latePresentSkipCount) +
+			",\"retained_frame_present_count\":" + std::to_string(telemetryStats.retainedFramePresentCount) +
 			",\"missed_present_streak_max\":" + std::to_string(telemetryStats.missedPresentStreakMax) +
 			"," + LabPacingConfig::TelemetryFields() +
 			",\"rtt_ms\":" + std::to_string(telemetryStats.lastRtt) +
@@ -251,7 +252,8 @@ void Stats::SubmitRenderStats(double preWaitTimeMs,
                               double presentTargetSubmitLateMs,
                               double presentReturnToNextVblankMs,
                               bool hitDeadline,
-                              bool skippedLatePresent) {
+                              bool skippedLatePresent,
+                              bool retainedFramePresented) {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_ActiveWndVideoStats.totalRenderTimeUs += static_cast<uint64_t>(renderTimeMs * 1000);
 	m_ActiveWndVideoStats.renderedFrames++;
@@ -291,6 +293,9 @@ void Stats::SubmitRenderStats(double preWaitTimeMs,
 	}
 	if (skippedLatePresent) {
 		m_ActiveWndVideoStats.latePresentSkipCount++;
+	}
+	if (retainedFramePresented) {
+		m_ActiveWndVideoStats.retainedFramePresentCount++;
 	}
 	m_presentDxgiCallWindow.push_back(presentDxgiCallMs);
 	m_presentTotalWindow.push_back(presentTotalMs);
@@ -334,6 +339,7 @@ void Stats::addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_ST
 	dst.presentSubmitLateCount += src.presentSubmitLateCount;
 	dst.presentTargetSubmitLateCount += src.presentTargetSubmitLateCount;
 	dst.latePresentSkipCount += src.latePresentSkipCount;
+	dst.retainedFramePresentCount += src.retainedFramePresentCount;
 	dst.missedPresentStreakMax = std::max(dst.missedPresentStreakMax, src.missedPresentStreakMax);
 
 	if (dst.minHostProcessingLatency == 0) {
