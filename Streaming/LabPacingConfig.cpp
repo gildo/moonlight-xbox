@@ -125,12 +125,12 @@ namespace {
 
 		switch (((index % 7) + 7) % 7) {
 		case 0: SetVariant("A-current", 0, true, 0.0, 5, 1, false); break;
-		case 1: SetVariant("B-lead2", 0, true, 2.0, 5, 1, false); break;
-		case 2: SetVariant("C-sync1-nowait", 1, false, 0.0, 5, 1, false); break;
-		case 3: SetVariant("D-sync1-lead2", 1, true, 2.0, 5, 1, false); break;
-		case 4: SetVariant("E-best-buffers3", 0, true, 2.0, 3, 1, false); break;
-		case 5: SetVariant("F-best-ring3", 0, true, 2.0, 3, 3, false); break;
-		case 6: SetVariant("G-waitable", 1, false, 0.0, 3, 3, true); break;
+		case 1: SetVariant("B-candidate-lead2-buf3-ring3", 0, true, 2.0, 3, 3, false); break;
+		case 2: SetVariant("C-sync1-candidate-buf3-ring3", 1, true, 2.0, 3, 3, false); break;
+		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
+		case 4: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
+		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
+		case 6: SetVariant("G-waitable-buf3-ring3", 1, false, 0.0, 3, 3, true); break;
 		}
 
 		try {
