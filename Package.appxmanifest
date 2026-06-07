@@ -10,7 +10,7 @@
   <Identity
     Name="Gildo.MoonlightUWPPacingLab"
 	Publisher="CN=CE07B73A-712E-4E05-932B-D08CE2C8A87C"
-    Version="1.18.1.23" />
+    Version="1.18.1.24" />
 
   <mp:PhoneIdentity PhoneProductId="2d38dd53-f3e2-4d11-9016-52d9a7241094" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
