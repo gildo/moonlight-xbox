@@ -216,6 +216,7 @@ namespace moonlight_xbox_dx {
 		PLENTRY entry = decodeUnit->bufferList;
 		int length = 0;
 		QueryPerformanceCounter(&decodeStart);
+		decodeEnd = decodeStart;
 
 		if (m_StreamEpochQpc == 0) m_StreamEpochQpc = decodeStart.QuadPart;
 
@@ -252,15 +253,14 @@ namespace moonlight_xbox_dx {
 		m_deviceResources->GetStats()->SubmitVideoBytesAndReassemblyTime(length, decodeUnit, droppedFramesNetwork);
 
 		// ffmpeg_decode
-		AVPacket *pkt = av_packet_alloc();
-		pkt->data = ffmpeg_buffer;
-		pkt->size = length;
-		pkt->pts = (int64_t)decodeUnit->rtpTimestamp;
-		pkt->dts = pkt->pts;
+		AVPacket pkt = {};
+		pkt.data = ffmpeg_buffer;
+		pkt.size = length;
+		pkt.pts = (int64_t)decodeUnit->rtpTimestamp;
+		pkt.dts = pkt.pts;
 
-		int err = avcodec_send_packet(decoder_ctx, pkt);
-		av_packet_unref(pkt);
-		av_packet_free(&pkt);
+		int err = avcodec_send_packet(decoder_ctx, &pkt);
+		av_packet_unref(&pkt);
 		if (err < 0) {
 			char ffmpegError[1024];
 			av_strerror(err, ffmpegError, 1024);
