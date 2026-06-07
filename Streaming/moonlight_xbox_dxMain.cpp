@@ -117,6 +117,7 @@ moonlight_xbox_dxMain::moonlight_xbox_dxMain(const std::shared_ptr<DX::DeviceRes
 	m_stats = std::make_shared<Stats>();
 	m_deviceResources->SetStats(m_stats);
 
+	LabPacingConfig::ReloadForStream();
 	m_sceneRenderer = std::make_shared<VideoRenderer>(m_deviceResources, moonlightClient, configuration);
 
 	client->OnCompleted = ([this, streamPage, configuration]() {

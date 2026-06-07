@@ -207,7 +207,6 @@ void MoonlightClient::StopApp() {
 	gs_quit_app(&serverData);
 }
 int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, StreamConfiguration^ sConfig) {
-	LabPacingConfig::ReloadForStream();
 	g_connectionTerminated.store(false, std::memory_order_release);
 	g_lastTerminationStatus.store(0, std::memory_order_release);
 	LabLogger::Event("stream_start_requested",
