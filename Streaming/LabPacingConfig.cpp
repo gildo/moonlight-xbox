@@ -27,6 +27,7 @@ namespace {
 	int g_textureRingSize = 1;
 	bool g_loadedJsonConfig = false;
 	bool g_preparedForPendingStream = false;
+	ULONGLONG g_lastStreamConfigMs = 0;
 
 	int ReadIntSetting(const wchar_t* key, int fallback) {
 		try {
@@ -128,7 +129,8 @@ namespace {
 
 		switch (((index % 7) + 7) % 7) {
 		case 0: SetVariant("A-current", 0, true, 0.0, 5, 1, false); break;
-		case 1: SetVariant("B-candidate-lead2-buf3-ring3", 0, true, 2.0, 3, 3, false); break;
+		// Recovery slot: 1.18.1.12 double-advanced LocalState to index 8 before E was measured.
+		case 1: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
 		case 2: SetVariant("C-sync1-candidate-buf3-ring3", 1, true, 2.0, 3, 3, false); break;
 		case 3: SetVariant("D-sync1-nowait-buf3-ring3", 1, false, 0.0, 3, 3, false); break;
 		case 4: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
@@ -211,13 +213,15 @@ void LabPacingConfig::Initialize() {
 
 void LabPacingConfig::ReloadForStream() {
 	std::lock_guard<std::mutex> lock(g_configMutex);
-	if (g_preparedForPendingStream) {
+	ULONGLONG nowMs = GetTickCount64();
+	if (g_preparedForPendingStream || (g_initialized.load(std::memory_order_relaxed) && g_lastStreamConfigMs != 0 && nowMs - g_lastStreamConfigMs < 5000)) {
 		Utils::Logf("Reusing pending lab pacing config for stream setup: variant=%s\n", g_variantLabel.c_str());
 		return;
 	}
 	ResetDefaults();
 	LoadConfig();
 	g_preparedForPendingStream = true;
+	g_lastStreamConfigMs = nowMs;
 	g_initialized.store(true, std::memory_order_release);
 }
 
