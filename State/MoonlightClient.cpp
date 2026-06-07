@@ -14,6 +14,7 @@ extern "C" {
 #include <Utils.hpp>
 #include <atomic>
 #include <cmath>
+#include <mutex>
 #include <gamingdeviceinformation.h>
 #include "Streaming\FFMpegDecoder.h"
 
@@ -178,7 +179,18 @@ bool MoonlightClient::SetDisplayHDR(bool enabled, const SS_HDR_METADATA &sunshin
 	return false;
 }
 
-MoonlightClient *connectedInstance;
+namespace {
+	std::mutex g_connectedInstanceMutex;
+	MoonlightClient* g_connectedInstance = nullptr;
+
+	template <typename Callback>
+	void WithConnectedInstance(Callback callback) {
+		std::lock_guard<std::mutex> lock(g_connectedInstanceMutex);
+		if (g_connectedInstance != nullptr) {
+			callback(g_connectedInstance);
+		}
+	}
+}
 
 MoonlightClient::MoonlightClient()
     : m_isHDR(false),
@@ -197,6 +209,12 @@ MoonlightClient::MoonlightClient()
 }
 
 MoonlightClient::~MoonlightClient() {
+	{
+		std::lock_guard<std::mutex> lock(g_connectedInstanceMutex);
+		if (g_connectedInstance == this) {
+			g_connectedInstance = nullptr;
+		}
+	}
 	if (hostname != NULL) {
 		free(hostname);
 		hostname = NULL;
@@ -319,7 +337,10 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 	}
 
 	// Sleep(10000);
-	connectedInstance = this;
+	{
+		std::lock_guard<std::mutex> lock(g_connectedInstanceMutex);
+		g_connectedInstance = this;
+	}
 	CONNECTION_LISTENER_CALLBACKS callbacks;
 	LiInitializeConnectionCallbacks(&callbacks);
 	callbacks.logMessage = log_message;
@@ -378,10 +399,16 @@ void connection_started() {
 	char message[2048];
 	sprintf(message, "Connection Started\n");
 	Utils::Log(message);
-	LabLogger::Event("connection_started");
-	if (connectedInstance->OnCompleted != nullptr) {
-		connectedInstance->OnCompleted();
+	if (g_connectionTerminated.load(std::memory_order_acquire)) {
+		LabLogger::Event("connection_started_after_termination");
+		return;
 	}
+	LabLogger::Event("connection_started");
+	WithConnectedInstance([](MoonlightClient* instance) {
+		if (instance->OnCompleted != nullptr) {
+			instance->OnCompleted();
+		}
+	});
 }
 
 void connection_status_update(int status) {
@@ -399,15 +426,19 @@ void connection_status_completed(int status) {
 	Utils::Log(message);
 	LabLogger::Event("stage_completed", "\"stage\":" + std::to_string(status) +
 		",\"stage_name\":" + LabLogger::JsonString(LiGetFormattedStageName(status)));
-	if (connectedInstance->OnStatusUpdate != nullptr) {
-		connectedInstance->OnStatusUpdate(status);
-	}
+	WithConnectedInstance([status](MoonlightClient* instance) {
+		if (instance->OnStatusUpdate != nullptr) {
+			instance->OnStatusUpdate(status);
+		}
+	});
 }
 
 void connection_set_hdr(bool enable) {
-	if (connectedInstance->SetHDR != nullptr) {
-		connectedInstance->SetHDR(enable);
-	}
+	WithConnectedInstance([enable](MoonlightClient* instance) {
+		if (instance->SetHDR != nullptr) {
+			instance->SetHDR(enable);
+		}
+	});
 }
 
 void connection_terminated(int status) {
@@ -446,21 +477,27 @@ void stage_failed(int stage, int err) {
 	LabLogger::Event("stage_failed", "\"stage\":" + std::to_string(stage) +
 		",\"stage_name\":" + LabLogger::JsonString(LiGetFormattedStageName(stage)) +
 		",\"error\":" + std::to_string(err));
-	if (connectedInstance->OnFailed != nullptr) {
-		connectedInstance->OnFailed(stage, err, message);
-	}
+	WithConnectedInstance([&](MoonlightClient* instance) {
+		if (instance->OnFailed != nullptr) {
+			instance->OnFailed(stage, err, message);
+		}
+	});
 }
 
 void connection_rumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor) {
-	if (connectedInstance->OnRumble != nullptr) {
-		connectedInstance->OnRumble(controllerNumber, lowFreqMotor, highFreqMotor);
-	}
+	WithConnectedInstance([controllerNumber, lowFreqMotor, highFreqMotor](MoonlightClient* instance) {
+		if (instance->OnRumble != nullptr) {
+			instance->OnRumble(controllerNumber, lowFreqMotor, highFreqMotor);
+		}
+	});
 }
 
 void connection_trigger_rumble(unsigned short controllerNumber, unsigned short leftTriggerMotor, unsigned short rightTriggerMotor) {
-	if (connectedInstance->OnTriggerRumble != nullptr) {
-		connectedInstance->OnTriggerRumble(controllerNumber, leftTriggerMotor, rightTriggerMotor);
-	}
+	WithConnectedInstance([controllerNumber, leftTriggerMotor, rightTriggerMotor](MoonlightClient* instance) {
+		if (instance->OnTriggerRumble != nullptr) {
+			instance->OnTriggerRumble(controllerNumber, leftTriggerMotor, rightTriggerMotor);
+		}
+	});
 }
 
 int MoonlightClient::Connect(const char *hostname) {

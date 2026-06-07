@@ -242,7 +242,14 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 		double ewmaPresentLockMs = 0.25; // FFmpeg/D3D lock cost before Present()
 
 		// Calculate the updated frame and render once per vertical blanking interval.
-		while (action->Status == AsyncStatus::Started && !moonlightClient->IsConnectionTerminated()) {
+		while (action->Status == AsyncStatus::Started) {
+			if (moonlightClient->IsConnectionTerminated()) {
+				if (m_sceneRenderer && !m_sceneRenderer->IsLoadingComplete()) {
+					Sleep(10);
+					continue;
+				}
+				break;
+			}
 			m_deviceResources->WaitForFrameLatency();
 
 			// Get overall deadline we must hit by the Present for this frame
