@@ -27,6 +27,8 @@ namespace {
 	int g_textureRingSize = 1;
 	bool g_leadAwareFrameWait = false;
 	bool g_skipLatePresent = false;
+	double g_latePresentSkipGraceMs = 0.0;
+	double g_renderSafetyMs = 1.5;
 	bool g_loadedJsonConfig = false;
 	bool g_preparedForPendingStream = false;
 	ULONGLONG g_lastStreamConfigMs = 0;
@@ -47,6 +49,35 @@ namespace {
 				return static_cast<int>(prop->GetUInt32());
 			case Windows::Foundation::PropertyType::Boolean:
 				return prop->GetBoolean() ? 1 : 0;
+			default:
+				return fallback;
+			}
+		}
+		catch (...) {
+			return fallback;
+		}
+	}
+
+	double ReadDoubleSetting(const wchar_t* key, double fallback) {
+		try {
+			auto values = Windows::Storage::ApplicationData::Current->LocalSettings->Values;
+			auto boxed = values->Lookup(ref new Platform::String(key));
+			auto prop = dynamic_cast<Windows::Foundation::IPropertyValue^>(boxed);
+			if (prop == nullptr) {
+				return fallback;
+			}
+
+			switch (prop->Type) {
+			case Windows::Foundation::PropertyType::Int32:
+				return static_cast<double>(prop->GetInt32());
+			case Windows::Foundation::PropertyType::UInt32:
+				return static_cast<double>(prop->GetUInt32());
+			case Windows::Foundation::PropertyType::Single:
+				return static_cast<double>(prop->GetSingle());
+			case Windows::Foundation::PropertyType::Double:
+				return prop->GetDouble();
+			case Windows::Foundation::PropertyType::Boolean:
+				return prop->GetBoolean() ? 1.0 : 0.0;
 			default:
 				return fallback;
 			}
@@ -82,6 +113,8 @@ namespace {
 			g_textureRingSize = config.value("texture_ring_size", g_textureRingSize);
 			g_leadAwareFrameWait = config.value("lead_aware_frame_wait", g_leadAwareFrameWait);
 			g_skipLatePresent = config.value("skip_late_present", g_skipLatePresent);
+			g_latePresentSkipGraceMs = config.value("late_present_skip_grace_ms", g_latePresentSkipGraceMs);
+			g_renderSafetyMs = config.value("render_safety_ms", g_renderSafetyMs);
 			Utils::Logf("Loaded lab pacing config from LocalState moonlight-lab-pacing.json\n");
 			return true;
 		}
@@ -114,7 +147,10 @@ namespace {
 	                int textureRingSize,
 	                bool waitableSwapChain,
 	                bool leadAwareFrameWait = false,
-	                bool skipLatePresent = false) {
+	                bool skipLatePresent = false,
+	                double latePresentSkipGraceMs = 0.0,
+	                double renderSafetyMs = 1.5,
+	                bool noLockAroundPresent = ML_LAB_NO_LOCK_PRESENT_DEFAULT != 0) {
 		g_variantLabel = label;
 		g_presentSyncInterval = presentSyncInterval;
 		g_manualPresentWait = manualPresentWait;
@@ -124,8 +160,11 @@ namespace {
 		g_textureRingSize = textureRingSize;
 		g_waitableSwapChain = waitableSwapChain;
 		g_maxFrameLatency = 1;
+		g_noLockAroundPresent = noLockAroundPresent;
 		g_leadAwareFrameWait = leadAwareFrameWait;
 		g_skipLatePresent = skipLatePresent;
+		g_latePresentSkipGraceMs = latePresentSkipGraceMs;
+		g_renderSafetyMs = renderSafetyMs;
 	}
 
 	void ApplyAutoVariant() {
@@ -148,7 +187,7 @@ namespace {
 		case 4: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
 		case 5: SetVariant("F-lead2-buf2-ring3", 0, true, 2.0, 2, 3, false); break;
 		case 6: SetVariant("H-lead2-targetwait-skiplate-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true); break;
-		case 7: SetVariant("E-lead3-buf3-ring3", 0, true, 3.0, 3, 3, false); break;
+		case 7: SetVariant("I-lead2-targetwait-grace6-safety25-buf3-ring3", 0, true, 2.0, 3, 3, false, true, true, 6.0, 2.5); break;
 		}
 
 		try {
@@ -175,6 +214,8 @@ namespace {
 		g_textureRingSize = 1;
 		g_leadAwareFrameWait = false;
 		g_skipLatePresent = false;
+		g_latePresentSkipGraceMs = 0.0;
+		g_renderSafetyMs = 1.5;
 		g_loadedJsonConfig = false;
 	}
 
@@ -196,8 +237,10 @@ namespace {
 		g_textureRingSize = std::clamp(ReadIntSetting(L"xbox_lab_texture_ring_size", g_textureRingSize), 1, 5);
 		g_leadAwareFrameWait = ReadIntSetting(L"xbox_lab_lead_aware_frame_wait", g_leadAwareFrameWait ? 1 : 0) != 0;
 		g_skipLatePresent = ReadIntSetting(L"xbox_lab_skip_late_present", g_skipLatePresent ? 1 : 0) != 0;
+		g_latePresentSkipGraceMs = std::clamp(ReadDoubleSetting(L"xbox_lab_late_present_skip_grace_ms", g_latePresentSkipGraceMs), 0.0, 16.0);
+		g_renderSafetyMs = std::clamp(ReadDoubleSetting(L"xbox_lab_render_safety_ms", g_renderSafetyMs), 0.5, 8.0);
 
-		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d lead_aware_frame_wait=%d skip_late_present=%d\n",
+		Utils::Logf("Lab pacing config: variant=%s present_interval=%d manual_present_wait=%d present_lead_ms=%.3f swapchain_buffers=%d frame_queue_hwm=%d decoder_throttle_ms=%d no_lock_present=%d waitable_swapchain=%d max_frame_latency=%d texture_ring_size=%d lead_aware_frame_wait=%d skip_late_present=%d late_present_skip_grace_ms=%.3f render_safety_ms=%.3f\n",
 		            g_variantLabel.c_str(),
 		            g_presentSyncInterval,
 		            g_manualPresentWait ? 1 : 0,
@@ -210,7 +253,9 @@ namespace {
 		            g_maxFrameLatency,
 		            g_textureRingSize,
 		            g_leadAwareFrameWait ? 1 : 0,
-		            g_skipLatePresent ? 1 : 0);
+		            g_skipLatePresent ? 1 : 0,
+		            g_latePresentSkipGraceMs,
+		            g_renderSafetyMs);
 
 		LabLogger::Event("lab_pacing_config", LabPacingConfig::TelemetryFields());
 	}
@@ -241,6 +286,8 @@ namespace {
 			g_textureRingSize = config.value("texture_ring_size", g_textureRingSize);
 			g_leadAwareFrameWait = config.value("lead_aware_frame_wait", g_leadAwareFrameWait);
 			g_skipLatePresent = config.value("skip_late_present", g_skipLatePresent);
+			g_latePresentSkipGraceMs = config.value("late_present_skip_grace_ms", g_latePresentSkipGraceMs);
+			g_renderSafetyMs = config.value("render_safety_ms", g_renderSafetyMs);
 			g_loadedJsonConfig = config.value("loaded_json_config", g_loadedJsonConfig);
 			Utils::Logf("Reused pending lab pacing config from LocalState: variant=%s\n", g_variantLabel.c_str());
 			LabLogger::Event("lab_pacing_config_reuse", LabPacingConfig::TelemetryFields());
@@ -272,6 +319,8 @@ namespace {
 			config["texture_ring_size"] = g_textureRingSize;
 			config["lead_aware_frame_wait"] = g_leadAwareFrameWait;
 			config["skip_late_present"] = g_skipLatePresent;
+			config["late_present_skip_grace_ms"] = g_latePresentSkipGraceMs;
+			config["render_safety_ms"] = g_renderSafetyMs;
 			config["loaded_json_config"] = g_loadedJsonConfig;
 
 			std::ofstream out(Utils::WideToNarrowString(LocalPendingConfigPath()), std::ios::trunc);
@@ -399,6 +448,16 @@ bool LabPacingConfig::SkipLatePresent() {
 	return g_skipLatePresent;
 }
 
+double LabPacingConfig::LatePresentSkipGraceMs() {
+	Initialize();
+	return g_latePresentSkipGraceMs;
+}
+
+double LabPacingConfig::RenderSafetyMs() {
+	Initialize();
+	return g_renderSafetyMs;
+}
+
 std::string LabPacingConfig::TelemetryFields() {
 	return "\"variant_label\":\"" + g_variantLabel + "\"" +
 		",\"present_interval\":" + std::to_string(g_presentSyncInterval) +
@@ -413,5 +472,7 @@ std::string LabPacingConfig::TelemetryFields() {
 		",\"texture_ring_size\":" + std::to_string(g_textureRingSize) +
 		",\"lead_aware_frame_wait\":" + std::to_string(g_leadAwareFrameWait ? 1 : 0) +
 		",\"skip_late_present\":" + std::to_string(g_skipLatePresent ? 1 : 0) +
+		",\"late_present_skip_grace_ms\":" + std::to_string(g_latePresentSkipGraceMs) +
+		",\"render_safety_ms\":" + std::to_string(g_renderSafetyMs) +
 		",\"config_source\":\"" + (g_loadedJsonConfig ? std::string("json") : std::string("auto-cycle")) + "\"";
 }

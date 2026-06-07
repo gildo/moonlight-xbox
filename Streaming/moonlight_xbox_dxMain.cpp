@@ -235,7 +235,6 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 		int64_t t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
 		int64_t lastFramePts = 0, lastPresentTime = 0;
 		double frametimeMs = 0.0, hostFrametimeMs = 0.0;
-		const double bufferMs = 1.5;   // safety wait time to avoid missing deadline
 		const double alphaUp = 0.25;   // react faster when renderMs spikes upward
 		const double alphaDown = 0.05; // decay slowly when renderMs drops
 		double ewmaRenderMs = 3.0;     // Initial guess for render cost
@@ -251,7 +250,8 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 			// wait for a frame + avg render time + safety buffer. The lead-aware
 			// candidate budgets against the actual compositor submit target.
 			double frameWaitBudgetMs = QpcToMs((LabPacingConfig::LeadAwareFrameWait() ? presentTarget : deadline) - t0);
-			double maxWaitMs = std::max(0.0, frameWaitBudgetMs - ewmaRenderMs - bufferMs);
+			double renderSafetyMs = LabPacingConfig::RenderSafetyMs();
+			double maxWaitMs = std::max(0.0, frameWaitBudgetMs - ewmaRenderMs - renderSafetyMs);
 			Pacer::instance().waitForFrame(maxWaitMs);
 			t1 = QpcNow();
 
@@ -284,8 +284,13 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 
 				int64_t tLockStart = QpcNow();
 				int64_t tBeforePresent = tLockStart;
+				bool skipLatePresent = LabPacingConfig::SkipLatePresent();
+				double latePresentSkipGraceMs = LabPacingConfig::LatePresentSkipGraceMs();
+				auto shouldSkipLatePresent = [&](int64_t qpc) {
+					return skipLatePresent && QpcToMs(qpc - deadline) > latePresentSkipGraceMs;
+				};
 				bool skippedLatePresent = false;
-				if (LabPacingConfig::SkipLatePresent() && tBeforePresent > deadline) {
+				if (shouldSkipLatePresent(tBeforePresent)) {
 					skippedLatePresent = true;
 				}
 				else if (LabPacingConfig::NoLockAroundPresent()) {
@@ -295,7 +300,7 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 					// lock is required around Present
 					auto guard = FFMpegDecoder::Lock();
 					tBeforePresent = QpcNow();
-					if (LabPacingConfig::SkipLatePresent() && tBeforePresent > deadline) {
+					if (shouldSkipLatePresent(tBeforePresent)) {
 						skippedLatePresent = true;
 					}
 					else {
@@ -357,12 +362,12 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				                                                 presentDeadlineHit,
 				                                                 skippedLatePresent);
 
-				FQLog("render loop %.3fms %s%s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms Target %.3fms PreWait %.3fms (max %.3fms) + Render %.3fms (avg %.3f) + WaitPresent %.3fms + Lock %.3fms + PresentDxgi %.3fms + PresentTotal %.3fms early %.3fms late %.3fms targetLate %.3fms)\n",
+				FQLog("render loop %.3fms %s%s%s%s pts:%.3fs frametime(c:%02.3fms h:%02.3fms) (Deadline %.3fms Target %.3fms PreWait %.3fms (max %.3fms safety %.3fms) + Render %.3fms (avg %.3f) + WaitPresent %.3fms + Lock %.3fms + PresentDxgi %.3fms + PresentTotal %.3fms early %.3fms late %.3fms targetLate %.3fms)\n",
 				      QpcToMs(t4 - t0),                             // loop time
 				      presentDeadlineHit ? " " : "M",               // missed deadline?
 				      isRepeatFrame ? "R" : " ",                    // repeated frame?
 				      skippedLatePresent ? "S" : " ",               // skipped a late present?
-				      preWaitMs > maxWaitMs + bufferMs ? "W" : " ", // we waited too long for a frame (including buffer)
+				      preWaitMs > maxWaitMs + renderSafetyMs ? "W" : " ", // we waited too long for a frame (including safety)
 				      (double)currentFramePts / 90000.0,            // host's timestamp (in seconds)
 				      frametimeMs,                                  // effective client frametime not counting repeated frames
 				      hostFrametimeMs,                              // host frametime
@@ -370,6 +375,7 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				      QpcToMs(presentTarget - t0),                  // present target time window until compositor submit point
 				      preWaitMs,                                    // prewait (time spent waiting for new frame to arrive)
 				      maxWaitMs,                                    // max wait allowed this frame
+				      renderSafetyMs,                                // reserved render safety budget
 				      renderMs,                                     // render time this frame
 				      ewmaRenderMs,                                 // average of render time used to control prewait
 				      beforePresentMs,                              // wait time to align present to vblank

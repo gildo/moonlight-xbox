@@ -40,6 +40,8 @@ namespace LabPacingConfig {
 	int TextureRingSize();
 	bool LeadAwareFrameWait();
 	bool SkipLatePresent();
+	double LatePresentSkipGraceMs();
+	double RenderSafetyMs();
 	std::string TelemetryFields();
 }
 }
