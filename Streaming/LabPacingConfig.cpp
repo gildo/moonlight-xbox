@@ -290,8 +290,18 @@ void LabPacingConfig::Initialize() {
 
 	std::lock_guard<std::mutex> lock(g_configMutex);
 	if (!g_initialized.load(std::memory_order_relaxed)) {
+		ULONGLONG nowMs = GetTickCount64();
 		ResetDefaults();
-		LoadConfig();
+		if (LoadPendingConfig(nowMs)) {
+			g_preparedForPendingStream = true;
+			g_lastStreamConfigMs = nowMs;
+		}
+		else {
+			LoadConfig();
+			g_preparedForPendingStream = true;
+			g_lastStreamConfigMs = nowMs;
+			SavePendingConfig(nowMs);
+		}
 		g_initialized.store(true, std::memory_order_release);
 	}
 }
@@ -299,10 +309,12 @@ void LabPacingConfig::Initialize() {
 void LabPacingConfig::ReloadForStream() {
 	std::lock_guard<std::mutex> lock(g_configMutex);
 	ULONGLONG nowMs = GetTickCount64();
-	if (g_preparedForPendingStream || (g_initialized.load(std::memory_order_relaxed) && g_lastStreamConfigMs != 0 && nowMs - g_lastStreamConfigMs < 5000)) {
+	bool hasFreshPreparedConfig = g_lastStreamConfigMs != 0 && nowMs >= g_lastStreamConfigMs && nowMs - g_lastStreamConfigMs < 5000;
+	if (g_preparedForPendingStream && hasFreshPreparedConfig) {
 		Utils::Logf("Reusing pending lab pacing config for stream setup: variant=%s\n", g_variantLabel.c_str());
 		return;
 	}
+	g_preparedForPendingStream = false;
 	ResetDefaults();
 	if (LoadPendingConfig(nowMs)) {
 		g_preparedForPendingStream = true;
