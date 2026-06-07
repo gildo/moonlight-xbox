@@ -267,8 +267,9 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 
 				bool rendered = false;
 				int64_t retainedFallbackTarget = 0;
-				if (LabPacingConfig::RetainedFrameFallback()) {
-					retainedFallbackTarget = presentWaitTarget - MsToQpc(LabPacingConfig::RetainedFrameFallbackMarginMs());
+				double retainedFallbackMarginMs = LabPacingConfig::RetainedFrameFallbackMarginMs();
+				if (LabPacingConfig::RetainedFrameFallback() && retainedFallbackMarginMs > 0.0) {
+					retainedFallbackTarget = presentWaitTarget - MsToQpc(retainedFallbackMarginMs);
 				}
 				{
 					// ffmpeg and Render both use the same D3D context
