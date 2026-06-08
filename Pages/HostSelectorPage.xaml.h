@@ -1,4 +1,4 @@
-﻿//
+//
 // HostSelectorPage.xaml.h
 // Declaration of the HostSelectorPage class
 //
@@ -48,5 +48,6 @@ namespace moonlight_xbox_dx
 		void wakeHostButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void testConnectionButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void ShowHostActions(Windows::UI::Xaml::FrameworkElement^ anchor, MoonlightHost^ host);
+		std::atomic<bool> isNavigating{false};
 	};
 }

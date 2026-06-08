@@ -1,4 +1,4 @@
-﻿//
+//
 // AppPage.xaml.h
 // Declaration of the AppPage class
 //
@@ -24,6 +24,7 @@ namespace moonlight_xbox_dx
 		std::atomic<bool> continueAppFetch{ false };
 		std::atomic<bool> wasConnected{ false };
 		std::atomic<bool> disconnectDialogShown{ false };
+		std::atomic<bool> isNavigating{ false };
 	protected:
 		virtual void OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) override;
 		virtual void OnNavigatedFrom(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) override;

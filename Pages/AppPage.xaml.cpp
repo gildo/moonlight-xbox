@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "AppPage.Xaml.h"
 #include "Common\ModalDialog.xaml.h"
 #include "HostSettingsPage.xaml.h"
@@ -56,6 +56,8 @@ void AppPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ 
 	host = mhost;
 	host->UpdateHostInfo(true);
 	host->UpdateApps();
+
+	isNavigating.store(false);
 
 	// Start background polling for app running state and connectivity
 	continueAppFetch.store(true);
@@ -165,6 +167,11 @@ void AppPage::AppsGrid_ItemClick(Platform::Object ^ sender, Windows::UI::Xaml::C
 
 void AppPage::Connect(int appId) {
 
+	if (isNavigating.exchange(true)) {
+		Utils::Log("AppPage::Connect duplicate launch suppressed\n");
+		return;
+	}
+
 	continueAppFetch.store(false);
 
 	MoonlightApp^ app = GetAppById(host, appId);
@@ -191,6 +198,7 @@ void AppPage::Connect(int appId) {
 	bool result = this->Frame->Navigate(Windows::UI::Xaml::Interop::TypeName(StreamPage::typeid), config);
 	if (!result) {
 		printf("C");
+		isNavigating.store(false);
 	}
 }
 

@@ -1,4 +1,4 @@
-﻿//
+//
 // HostSelectorPage.xaml.cpp
 // Implementation of the HostSelectorPage class
 //
@@ -258,13 +258,21 @@ void HostSelectorPage::Connect(MoonlightHost^ host) {
 		StartPairing(host);
 		return;
 	}
+	if (isNavigating.exchange(true)) {
+		Utils::Log("HostSelectorPage::Connect duplicate navigation suppressed\n");
+		return;
+	}
 	state->shouldAutoConnect = true;
 	continueFetch.store(false);
-		bool result = this->Frame->Navigate(Windows::UI::Xaml::Interop::TypeName(AppPage::typeid), host);
+	bool result = this->Frame->Navigate(Windows::UI::Xaml::Interop::TypeName(AppPage::typeid), host);
+	if (!result) {
+		isNavigating.store(false);
+	}
 }
 
 void HostSelectorPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) {
 	Windows::UI::ViewManagement::ApplicationView::GetForCurrentView()->SetDesiredBoundsMode(Windows::UI::ViewManagement::ApplicationViewBoundsMode::UseVisible);
+	isNavigating.store(false);
 	continueFetch.store(true);
 	Concurrency::create_task([this] {
 		init_mdns();

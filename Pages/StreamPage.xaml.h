@@ -1,4 +1,4 @@
-﻿//
+//
 // DirectXPage.xaml.h
 // Declaration of the DirectXPage class.
 //
@@ -131,6 +131,7 @@ namespace moonlight_xbox_dx
 		std::shared_ptr<DX::DeviceResources> m_deviceResources;
 		std::unique_ptr<moonlight_xbox_dxMain> m_main;
 		bool m_windowVisible;
+		std::atomic<int> m_loadGeneration{0};
 	    void Page_Loaded(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
 	    void Page_Unloaded(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e);
 

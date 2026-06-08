@@ -1,4 +1,4 @@
-﻿//
+//
 // DirectXPage.xaml.cpp
 // Implementation of the DirectXPage class.
 //
@@ -59,6 +59,7 @@ void StreamPage::Page_Loaded(Platform::Object ^ sender, Windows::UI::Xaml::Route
 
 	this->m_progressView->Visibility = Windows::UI::Xaml::Visibility::Visible;
 	this->m_progressRing->IsActive = true;
+	int generation = ++m_loadGeneration;
 
 	auto navigation = Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
 	m_back_cookie = navigation->BackRequested += ref new EventHandler<BackRequestedEventArgs ^>(this, &StreamPage::OnBackRequested);
@@ -79,9 +80,13 @@ void StreamPage::Page_Loaded(Platform::Object ^ sender, Windows::UI::Xaml::Route
 	}
 
 	Platform::WeakReference weakThis(this);
-	DISPATCH_UI([weakThis] {
+	DISPATCH_UI([weakThis, generation] {
 		auto that = weakThis.Resolve<StreamPage>();
 		if (that == nullptr) return;
+		if (that->m_loadGeneration != generation) {
+			Utils::Log("StreamPage::Page_Loaded: duplicate generation startup suppressed\n");
+			return;
+		}
 		try {
 			that->m_main = std::unique_ptr<moonlight_xbox_dxMain>(new moonlight_xbox_dxMain(that->m_deviceResources, that, new MoonlightClient(), that->configuration));
 			that->m_main->CreateDeviceDependentResources();
@@ -105,6 +110,8 @@ void StreamPage::Page_Loaded(Platform::Object ^ sender, Windows::UI::Xaml::Route
 void StreamPage::Page_Unloaded(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e) {
 	auto navigation = Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
 	navigation->BackRequested -= m_back_cookie;
+
+	m_loadGeneration++; // invalidate any pending loads
 
 	Gamepad::GamepadAdded -= gamepadAddedHandler;
 	Gamepad::GamepadRemoved -= gamepadRemovedHandler;
