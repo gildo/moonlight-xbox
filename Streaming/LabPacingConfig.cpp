@@ -145,6 +145,7 @@ namespace {
 	                bool manualPresentWait,
 	                double presentLeadMs,
 	                int swapchainBuffers,
+	                int frameQueueHwm,
 	                int textureRingSize,
 	                bool waitableSwapChain,
 	                bool leadAwareFrameWait = false,
@@ -160,7 +161,7 @@ namespace {
 		g_manualPresentWait = manualPresentWait;
 		g_presentLeadMs = presentLeadMs;
 		g_swapchainBuffers = swapchainBuffers;
-		g_frameQueueHwm = 1;
+		g_frameQueueHwm = frameQueueHwm;
 		g_textureRingSize = textureRingSize;
 		g_waitableSwapChain = waitableSwapChain;
 		g_maxFrameLatency = 1;
@@ -175,7 +176,7 @@ namespace {
 	}
 
 	void ApplyDefaultVariant() {
-		SetVariant("P-xboxones-refreshwindow-production", 0, true, 2.0, 3, 3,
+		SetVariant("P-xboxones-refreshwindow-production", 0, true, 2.0, 3, 2, 4,
 		           false, true, true, 6.0, 2.5, true, true, 0.0);
 		Utils::Logf("Selected production pacing variant label=%s\n", g_variantLabel.c_str());
 	}
