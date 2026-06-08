@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "VideoRenderer.h"
 #include <State\MoonlightClient.h>
 #include "..\Common\DirectXHelper.h"
@@ -92,13 +92,17 @@ static inline std::vector<DXGI_FORMAT> getVideoTextureSRVFormats(DXGI_FORMAT fmt
 	}
 }
 
-bool VideoRenderer::drawVideoTexture(UINT srvIndex) {
+bool VideoRenderer::drawVideoTexture(UINT srvIndex, const std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>* directSrvs) {
 	auto *ctx = m_deviceResources->GetD3DDeviceContext();
-	if (srvIndex >= m_VideoTextureResourceViews.size() ||
+	if (m_DirectSampling && !directSrvs) {
+		return false;
+	} else if (!m_DirectSampling && (srvIndex >= m_VideoTextureResourceViews.size() ||
 	    !m_VideoTextureResourceViews[srvIndex][0] ||
-	    !m_VideoTextureResourceViews[srvIndex][1] ||
-	    !m_VideoVertexBuffer ||
-	    !m_cscConstantBuffer) {
+	    !m_VideoTextureResourceViews[srvIndex][1])) {
+		return false;
+	}
+	
+	if (!m_VideoVertexBuffer || !m_cscConstantBuffer) {
 		return false;
 	}
 
@@ -115,7 +119,7 @@ bool VideoRenderer::drawVideoTexture(UINT srvIndex) {
 	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	ctx->IASetInputLayout(m_inputLayout.Get());
 	ctx->VSSetShader(m_vertexShader.Get(), nullptr, 0);
-	ctx->PSSetShader(m_pixelShaderYUV420.Get(), nullptr, 0);
+	ctx->PSSetShader(m_DirectSampling ? m_pixelShaderYUV420Array.Get() : m_pixelShaderYUV420.Get(), nullptr, 0);
 
 	UINT stride = sizeof(VERTEX);
 	UINT offset = 0;
@@ -123,7 +127,14 @@ bool VideoRenderer::drawVideoTexture(UINT srvIndex) {
 	ctx->IASetIndexBuffer(m_indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
 
 	// Bind SRVs for this frame
-	ID3D11ShaderResourceView* frameSrvs[] = { m_VideoTextureResourceViews[srvIndex][0].Get(), m_VideoTextureResourceViews[srvIndex][1].Get() };
+	ID3D11ShaderResourceView* frameSrvs[2];
+	if (m_DirectSampling) {
+		frameSrvs[0] = (*directSrvs)[0].Get();
+		frameSrvs[1] = (*directSrvs)[1].Get();
+	} else {
+		frameSrvs[0] = m_VideoTextureResourceViews[srvIndex][0].Get();
+		frameSrvs[1] = m_VideoTextureResourceViews[srvIndex][1].Get();
+	}
 	ctx->PSSetShaderResources(0, 2, frameSrvs);
 	ctx->PSSetConstantBuffers(0, 1, m_cscConstantBuffer.GetAddressOf());
 
@@ -156,25 +167,44 @@ bool VideoRenderer::Render(AVFrame *frame) {
 	ffmpegTexture->GetDesc(&ffmpegDesc);
 
 	bool hasChanged = hasFrameFormatChanged(frame);
-	if (hasChanged) {
-		setupVideoTexture(ffmpegDesc);
+	
+	UINT slice = (UINT)(intptr_t)frame->data[1];
+	const std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>* directSrvs = nullptr;
+	if (FFMpegDecoder::instance().directSamplingEnabled() && m_pixelShaderYUV420Array) {
+		directSrvs = getDirectSampleSrvs(ffmpegTexture, slice, ffmpegDesc);
 	}
+	m_DirectSampling = (directSrvs != nullptr);
 
-	UINT srvIndex = m_VideoTextureRingIndex++ % m_VideoTextureRingSize;
-	// Copy this frame into our video texture
-	ctx->CopySubresourceRegion1(m_VideoTextures[srvIndex].Get(), 0, 0, 0, 0,
-	                            (ID3D11Resource *)frame->data[0], (int)(intptr_t)frame->data[1],
-	                            nullptr, D3D11_COPY_DISCARD);
+	UINT srvIndex = 0;
+	if (!m_DirectSampling) {
+		if (hasChanged || !m_VideoTextures[0]) {
+			setupVideoTexture(ffmpegDesc);
+		}
+
+		srvIndex = m_VideoTextureRingIndex++ % m_VideoTextureRingSize;
+		// Copy this frame into our video texture
+		ctx->CopySubresourceRegion1(m_VideoTextures[srvIndex].Get(), 0, 0, 0, 0,
+		                            (ID3D11Resource *)frame->data[0], slice,
+		                            nullptr, D3D11_COPY_DISCARD);
+
+		m_LastVideoTextureIndex = srvIndex;
+		m_HasRetainedVideoTexture = true;
+	} else {
+		if (hasChanged) {
+			setupVideoTexture(ffmpegDesc);
+		}
+		if (m_RetainedDirectFrame != frame) {
+			if (m_RetainedDirectFrame) av_frame_free(&m_RetainedDirectFrame);
+			m_RetainedDirectFrame = av_frame_clone(frame);
+		}
+	}
 
 	if (hasChanged) {
 		setupVertexBuffer(ffmpegDesc);
 		bindColorConversion(frame, ffmpegDesc);
 	}
 
-	m_LastVideoTextureIndex = srvIndex;
-	m_HasRetainedVideoTexture = true;
-
-	if (!drawVideoTexture(srvIndex)) {
+	if (!drawVideoTexture(srvIndex, directSrvs)) {
 		return false;
 	}
 
@@ -205,6 +235,10 @@ bool VideoRenderer::Render(AVFrame *frame) {
 }
 
 bool VideoRenderer::RenderRetained() {
+	if (m_DirectSampling && m_RetainedDirectFrame) {
+		return Render(m_RetainedDirectFrame);
+	}
+
 	if (!m_HasRetainedVideoTexture) {
 		return false;
 	}
@@ -214,7 +248,7 @@ bool VideoRenderer::RenderRetained() {
 		return true;
 	}
 
-	return drawVideoTexture(m_LastVideoTextureIndex);
+	return drawVideoTexture(m_LastVideoTextureIndex, nullptr);
 }
 
 void VideoRenderer::CreateDeviceDependentResources()
@@ -225,42 +259,60 @@ void VideoRenderer::CreateDeviceDependentResources()
 	{
 		auto vertexShaderBytecode = DX::ReadData(L"Assets\\Shader\\d3d11_vertex.fxc");
 		DX::ThrowIfFailed(
-		    m_deviceResources->GetD3DDevice()->CreateVertexShader(
-		        vertexShaderBytecode.data(),
-		        vertexShaderBytecode.size(),
-		        nullptr,
+			m_deviceResources->GetD3DDevice()->CreateVertexShader(
+				vertexShaderBytecode.data(),
+				vertexShaderBytecode.size(),
+				nullptr,
 				&m_vertexShader
-			)
-			, "Vertex Shader Creation");
+			),
+			"Vertex Shader Creation"
+		);
 
 		static const D3D11_INPUT_ELEMENT_DESC vertexDesc[] =
-		    {
-				{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-				{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		    };
+		{
+			{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		};
 
 		DX::ThrowIfFailed(
-		    m_deviceResources->GetD3DDevice()->CreateInputLayout(
-		        vertexDesc,
-		        ARRAYSIZE(vertexDesc),
-		        vertexShaderBytecode.data(),
-		        vertexShaderBytecode.size(),
+			m_deviceResources->GetD3DDevice()->CreateInputLayout(
+				vertexDesc,
+				ARRAYSIZE(vertexDesc),
+				vertexShaderBytecode.data(),
+				vertexShaderBytecode.size(),
 				&m_inputLayout
-			)
-			, "Input Layout Creation");
+			),
+			"Input Layout Creation"
+		);
 	}
 
-	// Pixel shader
+	// Pixel shaders
 	{
 		auto pixelShaderBytecode = DX::ReadData(L"Assets\\Shader\\d3d11_yuv420_pixel.fxc");
 		DX::ThrowIfFailed(
-		    m_deviceResources->GetD3DDevice()->CreatePixelShader(
-		        pixelShaderBytecode.data(),
-		        pixelShaderBytecode.size(),
-		        nullptr,
+			m_deviceResources->GetD3DDevice()->CreatePixelShader(
+				pixelShaderBytecode.data(),
+				pixelShaderBytecode.size(),
+				nullptr,
 				&m_pixelShaderYUV420
 			)
 			, "Pixel Shader Creation");
+	}
+
+	// Texture2DArray pixel shader (direct-sampling path). Loaded best-effort: if the
+	// asset is missing or fails to compile/create, we simply never enable direct
+	// sampling and keep using the copy path with the Texture2D shader above.
+	try {
+		auto arrayBytecode = DX::ReadData(L"Assets\\Shader\\d3d11_yuv420_pixel_array.fxc");
+		HRESULT hr = m_deviceResources->GetD3DDevice()->CreatePixelShader(
+			arrayBytecode.data(), arrayBytecode.size(), nullptr, &m_pixelShaderYUV420Array);
+		if (FAILED(hr)) {
+			m_pixelShaderYUV420Array.Reset();
+			Utils::Logf("Array pixel shader creation failed (0x%08X); direct sampling disabled\n", (unsigned)hr);
+		}
+	} catch (...) {
+		m_pixelShaderYUV420Array.Reset();
+		Utils::Log("Array pixel shader asset missing; direct sampling disabled\n");
 	}
 
 	Windows::Graphics::Display::Core::HdmiDisplayInformation^ hdi = Windows::Graphics::Display::Core::HdmiDisplayInformation::GetForCurrentView();
@@ -334,6 +386,7 @@ void VideoRenderer::ReleaseDeviceDependentResources()
 	m_vertexShader.Reset();
 	m_inputLayout.Reset();
 	m_pixelShaderYUV420.Reset();
+	m_pixelShaderYUV420Array.Reset();
 	m_cscConstantBuffer.Reset();
 	m_VideoVertexBuffer.Reset();
 	m_samplerState.Reset();
@@ -347,6 +400,13 @@ void VideoRenderer::ReleaseDeviceDependentResources()
 		}
 	}
 	m_HasRetainedVideoTexture = false;
+
+	// Drop SRVs over decoder surfaces; the pool is owned by ffmpeg and is going away.
+	m_DirectSampleSrvs.clear();
+	m_DirectSampling = false;
+	if (m_RetainedDirectFrame) {
+		av_frame_free(&m_RetainedDirectFrame);
+	}
 }
 
 void VideoRenderer::scaleSourceToDestinationSurface(IRECT* src, IRECT* dst)
@@ -370,6 +430,44 @@ void VideoRenderer::screenSpaceToNormalizedDeviceCoords(IRECT* src, FRECT* dst, 
 	dst->y = ((float)src->y / (viewportHeight / 2.0f)) - 1.0f;
 	dst->w = (float)src->w / (viewportWidth / 2.0f);
 	dst->h = (float)src->h / (viewportHeight / 2.0f);
+}
+
+const std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>*
+VideoRenderer::getDirectSampleSrvs(ID3D11Texture2D* texture, UINT slice, const D3D11_TEXTURE2D_DESC& desc)
+{
+	auto it = m_DirectSampleSrvs.find(texture);
+	if (it == m_DirectSampleSrvs.end()) {
+		// Build the (luma, chroma) SRV pair for every slice of this array texture once.
+		std::vector<std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>> slices(desc.ArraySize);
+		auto formats = getVideoTextureSRVFormats(desc.Format);
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+		srvDesc.Texture2DArray.MostDetailedMip = 0;
+		srvDesc.Texture2DArray.MipLevels = 1;
+		srvDesc.Texture2DArray.ArraySize = 1;
+
+		auto* dev = m_deviceResources->GetD3DDevice();
+		for (UINT s = 0; s < desc.ArraySize; s++) {
+			srvDesc.Texture2DArray.FirstArraySlice = s;
+			for (size_t plane = 0; plane < formats.size() && plane < 2; plane++) {
+				srvDesc.Format = formats[plane];
+				HRESULT hr = dev->CreateShaderResourceView(texture, &srvDesc, &slices[s][plane]);
+				if (FAILED(hr)) {
+					Utils::Logf("Direct sampling SRV creation failed (slice %u, plane %zu, 0x%08X); using copy path\n",
+					            s, plane, (unsigned)hr);
+					return nullptr;
+				}
+			}
+		}
+		it = m_DirectSampleSrvs.emplace(texture, std::move(slices)).first;
+	}
+
+	if (slice >= it->second.size()) {
+		// Out of range slice index; should never happen, but stay safe.
+		return nullptr;
+	}
+	return &it->second[slice];
 }
 
 bool VideoRenderer::setupVideoTexture(D3D11_TEXTURE2D_DESC frameDesc)
