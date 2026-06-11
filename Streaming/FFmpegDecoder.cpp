@@ -1,9 +1,11 @@
 #include "pch.h"
 #include "FFMpegDecoder.h"
+#include "LabPacingConfig.h"
 #include "../Plot/ImGuiPlots.h"
 #include "StatsRenderer.h"
 
 #include <Common\DirectXHelper.h>
+#include <State\LabLogger.h>
 #include <d3d11_1.h>
 #include "Utils.hpp"
 #include "moonlight_xbox_dxMain.h"
@@ -85,9 +87,69 @@ namespace moonlight_xbox_dx {
 		Utils::Logf(shouldPrefixThisMessage ? "[ffmpeg] %s" : "%s", lineBuffer);
 	}
 
-    void FFMpegDecoder::CompleteInitialization(const std::shared_ptr<DX::DeviceResources>& res, STREAM_CONFIGURATION *config, bool framePacingImmediate) {
+	// ffmpeg calls this to let us pick the output pixel format. We use it as the
+	// hook to allocate a D3D11VA frame pool with D3D11_BIND_SHADER_RESOURCE so the
+	// renderer can sample decoder surfaces directly (skipping a per-frame copy).
+	static enum AVPixelFormat ff_get_format(AVCodecContext *avctx, const enum AVPixelFormat *pix_fmts) {
+		for (const enum AVPixelFormat *p = pix_fmts; *p != AV_PIX_FMT_NONE; p++) {
+			if (*p == AV_PIX_FMT_D3D11) {
+				auto *me = reinterpret_cast<FFMpegDecoder *>(avctx->opaque);
+				if (me) {
+					me->trySetupDirectSampleFramesContext(avctx);
+				}
+				return AV_PIX_FMT_D3D11;
+			}
+		}
+		// Should not happen for a D3D11VA decoder, but return whatever ffmpeg offers
+		return pix_fmts[0];
+	}
+
+	// Allocate the hwaccel frame pool ourselves so we can add D3D11_BIND_SHADER_RESOURCE
+	// to its textures. If anything fails we leave avctx->hw_frames_ctx alone and ffmpeg
+	// falls back to allocating its own default pool, which the renderer copies from.
+	void FFMpegDecoder::trySetupDirectSampleFramesContext(AVCodecContext *avctx) {
+		m_directSampling.store(false, std::memory_order_release);
+
+		AVBufferRef *frames_ref = nullptr;
+		int err = avcodec_get_hw_frames_parameters(avctx, avctx->hw_device_ctx, AV_PIX_FMT_D3D11, &frames_ref);
+		if (err < 0 || frames_ref == nullptr) {
+			Utils::Logf("Direct sampling: avcodec_get_hw_frames_parameters failed (%d), using copy path\n", err);
+			return;
+		}
+
+		auto *frames_ctx = reinterpret_cast<AVHWFramesContext *>(frames_ref->data);
+		auto *d3d11_frames = reinterpret_cast<AVD3D11VAFramesContext *>(frames_ctx->hwctx);
+
+		// Default is D3D11_BIND_DECODER only. Add SHADER_RESOURCE so we can create SRVs
+		// over the decoder surfaces. This keeps the pool as a single array texture
+		// (decoding requires that), just with an extra bind flag.
+		d3d11_frames->BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+
+		err = av_hwframe_ctx_init(frames_ref);
+		if (err < 0) {
+			// Most likely the driver won't allow BIND_DECODER | BIND_SHADER_RESOURCE
+			// on the same texture. Fall back to the copy path.
+			char e[256];
+			av_strerror(err, e, sizeof(e));
+			Utils::Logf("Direct sampling unavailable (av_hwframe_ctx_init: %s), using copy path\n", e);
+			av_buffer_unref(&frames_ref);
+			return;
+		}
+
+		// Release any pool from a previous get_format call (e.g. a mid-stream format
+		// change) before taking ownership of the new one, so we don't leak it.
+		if (avctx->hw_frames_ctx) {
+			av_buffer_unref(&avctx->hw_frames_ctx);
+		}
+		avctx->hw_frames_ctx = frames_ref; // transfer ownership to the codec
+		m_directSampling.store(true, std::memory_order_release);
+		Utils::Log("Direct sampling enabled: renderer will sample decoder surfaces without a per-frame copy\n");
+	}
+
+	void FFMpegDecoder::CompleteInitialization(const std::shared_ptr<DX::DeviceResources>& res, STREAM_CONFIGURATION *config, bool framePacingImmediate, int idrInterval) {
 		this->m_deviceResources = res;
 		this->fps = config->fps;
+		this->idrInterval = idrInterval;
 		Pacer::instance().init(res, config->fps, res->GetRefreshRate(), framePacingImmediate);
 	}
 
@@ -95,12 +157,11 @@ namespace moonlight_xbox_dx {
 		this->videoFormat = videoFormat;
 		this->width = width;
 		this->height = height;
-		this->fps = 60; // correctly set in CompleteInitialization
 
 		this->m_LastFrameNumber = 0;
 		this->ffmpeg_buffer_size = 0;
 		this->m_StreamEpochQpc = 0;
-
+	    this->m_FramesSinceIDR = 0;
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58,10,100)
 		avcodec_register_all();
@@ -150,6 +211,8 @@ namespace moonlight_xbox_dx {
 		decoder_ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
 		av_buffer_unref(&hw_device_ctx);
 		decoder_ctx->pix_fmt = AV_PIX_FMT_D3D11;
+		// get_format lets us allocate a frame pool we can sample directly (no per-frame copy)
+		decoder_ctx->get_format = ff_get_format;
 		decoder_ctx->sw_pix_fmt = (videoFormat & VIDEO_FORMAT_MASK_10BIT) ? AV_PIX_FMT_P010 : AV_PIX_FMT_NV12;
 		decoder_ctx->pkt_timebase.num = 1;
 		decoder_ctx->pkt_timebase.den = 90000;
@@ -214,6 +277,7 @@ namespace moonlight_xbox_dx {
 		PLENTRY entry = decodeUnit->bufferList;
 		int length = 0;
 		QueryPerformanceCounter(&decodeStart);
+		decodeEnd = decodeStart;
 
 		if (m_StreamEpochQpc == 0) m_StreamEpochQpc = decodeStart.QuadPart;
 
@@ -236,6 +300,7 @@ namespace moonlight_xbox_dx {
 			droppedFramesNetwork = decodeUnit->frameNumber - (m_LastFrameNumber + 1);
 		}
 		m_LastFrameNumber = decodeUnit->frameNumber;
+		LabLogger::NoteFrame(decodeUnit->frameNumber);
 
 		if (!decodeUnit->rtpTimestamp) {
 			// Estimate for hosts that don't send timestamps (e.g. Wolf)
@@ -249,15 +314,14 @@ namespace moonlight_xbox_dx {
 		m_deviceResources->GetStats()->SubmitVideoBytesAndReassemblyTime(length, decodeUnit, droppedFramesNetwork);
 
 		// ffmpeg_decode
-		AVPacket *pkt = av_packet_alloc();
-		pkt->data = ffmpeg_buffer;
-		pkt->size = length;
-		pkt->pts = (int64_t)decodeUnit->rtpTimestamp;
-		pkt->dts = pkt->pts;
+		AVPacket pkt = {};
+		pkt.data = ffmpeg_buffer;
+		pkt.size = length;
+		pkt.pts = (int64_t)decodeUnit->rtpTimestamp;
+		pkt.dts = pkt.pts;
 
-		int err = avcodec_send_packet(decoder_ctx, pkt);
-		av_packet_unref(pkt);
-		av_packet_free(&pkt);
+		int err = avcodec_send_packet(decoder_ctx, &pkt);
+		av_packet_unref(&pkt);
 		if (err < 0) {
 			char ffmpegError[1024];
 			av_strerror(err, ffmpegError, 1024);
@@ -280,6 +344,20 @@ namespace moonlight_xbox_dx {
 				return DR_NEED_IDR;
 			}
 
+			// Request new IDR frames periodically to mitigate stream corruption.
+			    if (idrInterval > 0 && fps > 0) {
+				    if (frame->key_frame) {
+					    m_FramesSinceIDR = 0;
+			    } else {
+				    m_FramesSinceIDR++;
+			    }
+
+			    if (m_FramesSinceIDR >= (fps * idrInterval)) {
+				    LiRequestIdrFrame();
+				    m_FramesSinceIDR = 0; // avoid requesting multiple IDR frames in a row
+			    }
+		    }
+
 			// Capture a frame timestamp to measuring pacing delay
 			QueryPerformanceCounter(&decodeEnd);
 			frame_attach_userdata(frame, decodeEnd.QuadPart);
@@ -300,6 +378,11 @@ namespace moonlight_xbox_dx {
 		double decodeTimeMs = QpcToMs(decodeEnd.QuadPart - decodeStart.QuadPart);
 		if (decodeEnd.QuadPart > decodeStart.QuadPart) {
 			m_deviceResources->GetStats()->SubmitDecodeMs(decodeTimeMs);
+		}
+
+		const int decoderThrottleMs = LabPacingConfig::DecoderThrottleMs();
+		if (decoderThrottleMs > 0) {
+			SleepUntilQpc(QpcNow() + MsToQpc(static_cast<double>(decoderThrottleMs)));
 		}
 
 		// Not the best way to handle this. BUT IT DOES FIX XBOX ONE TEARING!!!!

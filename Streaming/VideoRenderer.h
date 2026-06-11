@@ -1,10 +1,14 @@
-﻿#pragma once
+#pragma once
 
 #include "ShaderStructures.h"
 #include "Common\StepTimer.h"
 #include "State\MoonlightClient.h"
 #include "State\StreamConfiguration.h"
+#include <array>
 #include <atomic>
+#include <array>
+#include <unordered_map>
+#include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -47,11 +51,18 @@ namespace moonlight_xbox_dx
 		void SetHDR(bool enabled);
 		void Stop();
 		ID3D11Texture2D* GenerateTexture();
+		bool RenderRetained();
 
 
 	private:
 		bool setupVideoTexture(D3D11_TEXTURE2D_DESC frameDesc);
+		// Returns the (luma, chroma) SRV pair viewing a single slice of an ffmpeg
+		// decoder array texture, creating and caching them on first use. Returns
+		// nullptr on failure (caller should fall back to the copy path).
+		const std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>*
+			getDirectSampleSrvs(ID3D11Texture2D* texture, UINT slice, const D3D11_TEXTURE2D_DESC& desc);
 		void setupVertexBuffer(D3D11_TEXTURE2D_DESC frameDesc);
+		bool drawVideoTexture(UINT srvIndex, const std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>* directSrvs = nullptr);
 		void getFramePremultipliedCscConstants(const AVFrame* frame, std::array<float, 9> &cscMatrix, std::array<float, 3> &offsets);
 		void getFrameChromaCositingOffsets(const AVFrame* frame, std::array<float, 2> &chromaOffsets);
 		bool hasFrameFormatChanged(const AVFrame* frame);
@@ -65,13 +76,21 @@ namespace moonlight_xbox_dx
 		Microsoft::WRL::ComPtr<ID3D11Buffer>		m_indexBuffer;
 		Microsoft::WRL::ComPtr<ID3D11VertexShader>	m_vertexShader;
 		Microsoft::WRL::ComPtr<ID3D11PixelShader>	m_pixelShaderYUV420;
+		// Texture2DArray variant of the YUV->RGB shader, used when sampling decoder
+		// surfaces directly. May be null if the .fxc failed to load (we then stay on
+		// the copy path even if the decoder offered direct sampling).
+		Microsoft::WRL::ComPtr<ID3D11PixelShader>	m_pixelShaderYUV420Array;
 		Microsoft::WRL::ComPtr<ID3D11Buffer>		m_cscConstantBuffer;
 		Microsoft::WRL::ComPtr<ID3D11SamplerState>  m_samplerState;
 		Windows::Graphics::Display::Core::HdmiDisplayMode^ m_lastDisplayMode;
 		Windows::Graphics::Display::Core::HdmiDisplayMode^ m_currentDisplayMode;
 
-		Microsoft::WRL::ComPtr<ID3D11Texture2D>          m_VideoTexture;
-		std::array<std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>, 1> m_VideoTextureResourceViews;
+		std::array<Microsoft::WRL::ComPtr<ID3D11Texture2D>, 5> m_VideoTextures;
+		std::array<std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>, 5> m_VideoTextureResourceViews;
+		UINT m_VideoTextureRingIndex = 0;
+		UINT m_VideoTextureRingSize = 1;
+		UINT m_LastVideoTextureIndex = 0;
+		bool m_HasRetainedVideoTexture = false;
 
 		// Variables used with the rendering loop.
 		DXGI_HDR_METADATA_HDR10 m_lastHdr10;
@@ -97,6 +116,15 @@ namespace moonlight_xbox_dx
 		AVColorTransferCharacteristic m_LastColorTrc = AVCOL_TRC_UNSPECIFIED;
 		AVColorSpace m_LastColorSpace = AVCOL_SPC_UNSPECIFIED;
 		AVChromaLocation m_LastChromaLocation = AVCHROMA_LOC_UNSPECIFIED;
+
+		// Cache of SRVs over the ffmpeg decoder's array texture(s), used by the
+		// direct-sampling path. Keyed by the underlying ID3D11Texture2D*; the inner
+		// vector is indexed by array slice, each holding the (luma, chroma) pair.
+		std::unordered_map<ID3D11Texture2D*,
+			std::vector<std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>>> m_DirectSampleSrvs;
+		// Whether the direct-sampling path is active for this stream (decoder gave us
+		// a shader-resource-capable pool AND the array shader loaded).
+		bool m_DirectSampling = false;
+		AVFrame* m_RetainedDirectFrame = nullptr;
 	};
 }
-

@@ -6,6 +6,7 @@
 #include "Streaming\LogRenderer.h"
 #include "Streaming\StatsRenderer.h"
 #include "Pages\StreamPage.xaml.h"
+#include <atomic>
 
 // Xbox supports 8 controllers, this ought to be enough for anyone.
 #define MAX_GAMEPADS 8
@@ -43,9 +44,10 @@ namespace moonlight_xbox_dx
 
 		MoonlightClient* moonlightClient;
 	private:
+		bool TryBeginTeardown();
 		void ProcessInput();
 		void Update();
-		bool Render();
+		bool Render(int64_t retainedFallbackTargetQpc = 0);
 		void RenderImGui();
 
 		// Cached pointer to device resources.
@@ -57,8 +59,9 @@ namespace moonlight_xbox_dx
 
 		std::shared_ptr<Stats>         m_stats;
 
-		Windows::Foundation::IAsyncAction^ m_renderLoopWorker;
-		Windows::Foundation::IAsyncAction^ m_inputLoopWorker;
+		Windows::Foundation::IAsyncAction^ m_renderLoopWorker = nullptr;
+		Windows::Foundation::IAsyncAction^ m_inputLoopWorker = nullptr;
+		std::atomic<bool> m_teardownStarted{ false };
 		Concurrency::critical_section m_criticalSection;
 
 		// Rendering loop timer.

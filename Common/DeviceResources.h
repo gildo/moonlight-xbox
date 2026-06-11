@@ -27,6 +27,7 @@ namespace DX
 		void RegisterDeviceNotify(IDeviceNotify* deviceNotify);
 		void Trim();
 		void Present();
+		void WaitForFrameLatency();
 		void GetUWPPixelDimensions(uint32_t *width, uint32_t *height);
 		double GetUWPRefreshRate();
 		static int uwp_get_width();
@@ -121,6 +122,7 @@ namespace DX
 		DXGI_FORMAT                                     m_backBufferFormat;
 		bool                                            m_showImGui;
 		std::shared_ptr<moonlight_xbox_dx::Stats>       m_stats;
+		HANDLE                                          m_frameLatencyWaitableObject;
 		bool                                            m_imguiRunning;
 	};
 }

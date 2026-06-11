@@ -136,8 +136,9 @@
     <AppxBundlePlatforms>x64</AppxBundlePlatforms>
     <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
     <AppxPackageDir>C:\Progetti\moonlight-xbox-dx\AppPackages\moonlight-xbox-dx\</AppxPackageDir>
-	<PackageCertificateThumbprint>08A0E22DF66FB656740BDF193698ADCF5DF83543</PackageCertificateThumbprint>
-    <PackageCertificateKeyFile>moonlight-xbox-dx_TemporaryKey.pfx</PackageCertificateKeyFile>
+    <PackageCertificateThumbprint></PackageCertificateThumbprint>
+    <PackageCertificateKeyFile>cert.pfx</PackageCertificateKeyFile>
+    <PackageCertificatePassword>moonlight</PackageCertificatePassword>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <Link>
@@ -345,6 +346,7 @@
     <ClInclude Include="Plot\PlotDesc.h" />
     <ClInclude Include="State\BandwidthTracker.h" />
     <ClInclude Include="State\GamepadState.h" />
+    <ClInclude Include="State\LabLogger.h" />
     <ClInclude Include="State\MoonlightClient.h" />
     <ClInclude Include="State\Stats.h" />
     <ClInclude Include="State\StreamConfiguration.h" />
@@ -353,6 +355,7 @@
     <ClInclude Include="Common\StepTimer.h" />
     <ClInclude Include="Streaming\FrameCadence.h" />
     <ClInclude Include="Streaming\FrameQueue.h" />
+    <ClInclude Include="Streaming\LabPacingConfig.h" />
     <ClInclude Include="Streaming\Pacer.h" />
     <ClInclude Include="Streaming\PacerCompat.h" />
     <ClInclude Include="Streaming\VideoRenderer.h" />
@@ -487,12 +490,14 @@
     </ClCompile>
     <ClCompile Include="Plot\ImGuiPlots.cpp" />
     <ClCompile Include="State\BandwidthTracker.cpp" />
+    <ClCompile Include="State\LabLogger.cpp" />
     <ClCompile Include="State\MoonlightClient.cpp" />
     <ClCompile Include="State\Stats.cpp" />
     <ClCompile Include="State\StreamConfiguration.cpp" />
     <ClCompile Include="Common\DeviceResources.cpp" />
     <ClCompile Include="Streaming\FrameCadence.cpp" />
     <ClCompile Include="Streaming\FrameQueue.cpp" />
+    <ClCompile Include="Streaming\LabPacingConfig.cpp" />
     <ClCompile Include="Streaming\LogRenderer.cpp" />
     <ClCompile Include="Streaming\Pacer.cpp" />
     <ClCompile Include="Streaming\VideoRenderer.cpp" />
@@ -623,6 +628,10 @@
       <FileType>Document</FileType>
     </None>
     <None Include="Assets\Shader\d3d11_yuv420_pixel.fxc">
+      <DeploymentContent>true</DeploymentContent>
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Assets\Shader\d3d11_yuv420_pixel_array.fxc">
       <DeploymentContent>true</DeploymentContent>
       <FileType>Document</FileType>
     </None>

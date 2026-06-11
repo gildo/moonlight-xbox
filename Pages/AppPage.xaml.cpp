@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "AppPage.Xaml.h"
 #include "Common\ModalDialog.xaml.h"
 #include "HostSettingsPage.xaml.h"
@@ -57,9 +57,12 @@ void AppPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ 
 	host->UpdateHostInfo(true);
 	host->UpdateApps();
 
+	isNavigating.store(false);
+
 	// Start background polling for app running state and connectivity
 	continueAppFetch.store(true);
 	wasConnected.store(host->Connected);
+	disconnectDialogShown.store(false);
 
 	Platform::WeakReference weakThis(this);
 	create_task([weakThis]() {
@@ -70,7 +73,7 @@ void AppPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ 
 			try {
 				if (that->host != nullptr) {
 					that->host->UpdateAppRunningStates();
-					if (that->wasConnected.load() && !that->host->Connected) {
+					if (that->wasConnected.load() && !that->host->Connected && !that->disconnectDialogShown.exchange(true)) {
 						that->wasConnected.store(false);
 
 						// Show the disconnect dialog only if page instance still exists (no visible-page checks)
@@ -79,8 +82,15 @@ void AppPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ 
 							ref new Windows::UI::Core::DispatchedHandler([weakThis]() {
 								auto inner = weakThis.Resolve<AppPage>();
 								if (inner == nullptr) return;
+								if (!inner->continueAppFetch.load()) return;
 
 								try {
+									auto rootFrame = dynamic_cast<Windows::UI::Xaml::Controls::Frame ^>(Windows::UI::Xaml::Window::Current->Content);
+									if (rootFrame == nullptr || rootFrame->Content != inner) {
+										Utils::Log("[AppPage] Suppressed stale host disconnect dialog after navigation.\n");
+										return;
+									}
+
 									auto dialog = ref new Windows::UI::Xaml::Controls::ContentDialog();
 									dialog->Title = Utils::StringFromStdString("Disconnected");
 									dialog->Content = Utils::StringFromStdString("Connection to host was lost.");
@@ -88,8 +98,14 @@ void AppPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ 
 									concurrency::create_task(::moonlight_xbox_dx::ModalDialog::ShowOnceAsync(dialog)).then([weakThis](Windows::UI::Xaml::Controls::ContentDialogResult result) {
 										auto that2 = weakThis.Resolve<AppPage>();
 										if (that2 == nullptr) return;
+										if (!that2->continueAppFetch.load()) return;
 										that2->Dispatcher->RunAsync(Windows::UI::Core::CoreDispatcherPriority::Normal, ref new Windows::UI::Core::DispatchedHandler([that2]() {
 											try {
+												auto rootFrame = dynamic_cast<Windows::UI::Xaml::Controls::Frame ^>(Windows::UI::Xaml::Window::Current->Content);
+												if (rootFrame == nullptr || rootFrame->Content != that2) {
+													Utils::Log("[AppPage] Suppressed stale host disconnect navigation after stream navigation.\n");
+													return;
+												}
 												that2->Frame->Navigate(Windows::UI::Xaml::Interop::TypeName(HostSelectorPage::typeid));
 										    } catch (const std::exception &e) {
 											    Utils::Logf("[AppPage] Failed to navigate to HostSelectorPage after disconnect. Exception: %s\n", e.what());
@@ -151,6 +167,11 @@ void AppPage::AppsGrid_ItemClick(Platform::Object ^ sender, Windows::UI::Xaml::C
 
 void AppPage::Connect(int appId) {
 
+	if (isNavigating.exchange(true)) {
+		Utils::Log("AppPage::Connect duplicate launch suppressed\n");
+		return;
+	}
+
 	continueAppFetch.store(false);
 
 	MoonlightApp^ app = GetAppById(host, appId);
@@ -171,12 +192,14 @@ void AppPage::Connect(int appId) {
 	config->framePacing = host->FramePacing;
 	config->enableStats = host->EnableStats;
 	config->enableGraphs = host->EnableGraphs;
+	config->idrInterval = host->IdrInterval;
 	if (config->enableHDR) {
 		host->VideoCodec = "HEVC (H.265)";
 	}
 	bool result = this->Frame->Navigate(Windows::UI::Xaml::Interop::TypeName(StreamPage::typeid), config);
 	if (!result) {
 		printf("C");
+		isNavigating.store(false);
 	}
 }
 
@@ -379,4 +402,3 @@ void AppPage::OnUnloaded(Platform::Object^ sender, Windows::UI::Xaml::RoutedEven
 	// stop background polling loop
 	continueAppFetch.store(false);
 }
-

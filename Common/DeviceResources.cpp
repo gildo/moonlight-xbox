@@ -5,6 +5,8 @@
 #include <winrt/Windows.UI.Core.h>
 #include <Pages/StreamPage.xaml.h>
 #include <Streaming/FFmpegDecoder.h>
+#include <Streaming/LabPacingConfig.h>
+#include <State/LabLogger.h>
 #include <Plot/ImGuiPlots.h>
 
 using namespace moonlight_xbox_dx;
@@ -71,6 +73,7 @@ DX::DeviceResources::DeviceResources() :
 	m_compositionScaleY(1.0f),
 	m_deviceNotify(nullptr),
 	m_stats(nullptr),
+	m_frameLatencyWaitableObject(nullptr),
 	m_imguiRunning(false),
 	m_showImGui(false)
 {
@@ -217,7 +220,7 @@ void DX::DeviceResources::CreateWindowSizeDependentResources()
 			lround(m_d3dRenderTargetSize.Width),
 			lround(m_d3dRenderTargetSize.Height),
 			m_backBufferFormat,
-			0
+			LabPacingConfig::WaitableSwapChain() ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT : 0
 			);
 
 		Utils::Logf("m_swapChain->ResizeBuffers(%d x %d)\n",
@@ -250,9 +253,9 @@ void DX::DeviceResources::CreateWindowSizeDependentResources()
 		swapChainDesc.SampleDesc.Quality = 0;
 		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 		//Check moonlight-stream/moonlight-qt/app/streaming/video/ffmpeg-renderers/d3d11va.cpp for rationale
-		swapChainDesc.BufferCount = 5;
+		swapChainDesc.BufferCount = LabPacingConfig::SwapChainBufferCount();
 		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-		swapChainDesc.Flags = 0;
+		swapChainDesc.Flags = LabPacingConfig::WaitableSwapChain() ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT : 0;
 		swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
 		swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
 
@@ -286,12 +289,36 @@ void DX::DeviceResources::CreateWindowSizeDependentResources()
 			)
 		);
 
-		Utils::Logf("CreateSwapChainForComposition(%d x %d)\n",
-			lround(m_d3dRenderTargetSize.Width), lround(m_d3dRenderTargetSize.Height));
+		Utils::Logf("CreateSwapChainForComposition(%d x %d), buffers=%d\n",
+			lround(m_d3dRenderTargetSize.Width), lround(m_d3dRenderTargetSize.Height), swapChainDesc.BufferCount);
 
 		DX::ThrowIfFailed(
 			swapChain.As<IDXGISwapChain4>(&m_swapChain)
 		);
+
+		m_frameLatencyWaitableObject = nullptr;
+		if (LabPacingConfig::WaitableSwapChain()) {
+			ComPtr<IDXGISwapChain2> swapChain2;
+			if (SUCCEEDED(m_swapChain.As(&swapChain2))) {
+				HRESULT latencyHr = swapChain2->SetMaximumFrameLatency(LabPacingConfig::MaxFrameLatency());
+				m_frameLatencyWaitableObject = swapChain2->GetFrameLatencyWaitableObject();
+				if (SUCCEEDED(latencyHr) && m_frameLatencyWaitableObject != nullptr) {
+					Utils::Logf("Waitable swapchain enabled: max_frame_latency=%d\n", LabPacingConfig::MaxFrameLatency());
+				}
+				else {
+					Utils::Logf("Waitable swapchain unavailable: SetMaximumFrameLatency=0x%08X waitable=%p\n",
+						static_cast<unsigned int>(latencyHr),
+						m_frameLatencyWaitableObject);
+					LabLogger::Event("waitable_swapchain_unavailable",
+						std::string("\"set_maximum_frame_latency_hr\":") + std::to_string(static_cast<unsigned int>(latencyHr)));
+					m_frameLatencyWaitableObject = nullptr;
+				}
+			}
+			else {
+				Utils::Logf("Waitable swapchain unavailable: IDXGISwapChain2 query failed\n");
+				LabLogger::Event("waitable_swapchain_unavailable", "\"error\":\"query_idxgiswapchain2_failed\"");
+			}
+		}
 
 		// Associate swap chain with SwapChainPanel
 		// UI changes will need to be dispatched back to the UI thread
@@ -525,7 +552,7 @@ void DX::DeviceResources::Trim()
 // Present the contents of the swap chain to the screen.
 void DX::DeviceResources::Present()
 {
-	HRESULT hr = m_swapChain->Present(0, 0);
+	HRESULT hr = m_swapChain->Present(LabPacingConfig::PresentSyncInterval(), 0);
 
 	// If the device was removed either by a disconnection or a driver upgrade, we
 	// must recreate all device resources.
@@ -546,6 +573,18 @@ void DX::DeviceResources::Present()
 	}
 	else {
 		DX::ThrowIfFailed(hr);
+	}
+}
+
+void DX::DeviceResources::WaitForFrameLatency()
+{
+	if (!LabPacingConfig::WaitableSwapChain() || m_frameLatencyWaitableObject == nullptr) {
+		return;
+	}
+
+	DWORD wait = WaitForSingleObjectEx(m_frameLatencyWaitableObject, 16, TRUE);
+	if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT && wait != WAIT_IO_COMPLETION) {
+		Utils::Logf("Frame latency wait returned %lu\n", wait);
 	}
 }
 

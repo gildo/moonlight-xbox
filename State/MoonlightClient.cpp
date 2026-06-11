@@ -7,10 +7,14 @@ extern "C" {
 #include <libgamestream/errors.h>
 }
 #include <State\StreamConfiguration.h>
+#include <State\LabLogger.h>
+#include <Streaming\FrameQueue.h>
 #include <Streaming\AudioPlayer.h>
+#include <Streaming\LabPacingConfig.h>
 #include <Utils.hpp>
 #include <atomic>
 #include <cmath>
+#include <mutex>
 #include <gamingdeviceinformation.h>
 #include "Streaming\FFMpegDecoder.h"
 
@@ -20,6 +24,11 @@ using namespace Windows::Graphics::Display;
 using namespace Windows::Graphics::Display::Core;
 
 std::atomic<bool> g_connectionTerminated{false};
+std::atomic<int> g_lastTerminationStatus{0};
+
+static std::string SafePlatformStringToStdString(Platform::String^ value) {
+	return value == nullptr ? std::string() : Utils::PlatformStringToStdString(value);
+}
 
 void log_message(const char* fmt, ...);
 void connection_started();
@@ -170,7 +179,18 @@ bool MoonlightClient::SetDisplayHDR(bool enabled, const SS_HDR_METADATA &sunshin
 	return false;
 }
 
-MoonlightClient *connectedInstance;
+namespace {
+	std::mutex g_connectedInstanceMutex;
+	MoonlightClient* g_connectedInstance = nullptr;
+
+	template <typename Callback>
+	void WithConnectedInstance(Callback callback) {
+		std::lock_guard<std::mutex> lock(g_connectedInstanceMutex);
+		if (g_connectedInstance != nullptr) {
+			callback(g_connectedInstance);
+		}
+	}
+}
 
 MoonlightClient::MoonlightClient()
     : m_isHDR(false),
@@ -189,6 +209,12 @@ MoonlightClient::MoonlightClient()
 }
 
 MoonlightClient::~MoonlightClient() {
+	{
+		std::lock_guard<std::mutex> lock(g_connectedInstanceMutex);
+		if (g_connectedInstance == this) {
+			g_connectedInstance = nullptr;
+		}
+	}
 	if (hostname != NULL) {
 		free(hostname);
 		hostname = NULL;
@@ -199,7 +225,18 @@ void MoonlightClient::StopApp() {
 	gs_quit_app(&serverData);
 }
 int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, StreamConfiguration^ sConfig) {
+	LabPacingConfig::MarkStreamStarted();
 	g_connectionTerminated.store(false, std::memory_order_release);
+	g_lastTerminationStatus.store(0, std::memory_order_release);
+	LabLogger::Event("stream_start_requested",
+		"\"host\":" + LabLogger::JsonString(SafePlatformStringToStdString(sConfig->hostname)) +
+		",\"app_id\":" + std::to_string(sConfig->appID) +
+		",\"app_name\":" + LabLogger::JsonString(SafePlatformStringToStdString(sConfig->appName)) +
+		",\"width\":" + std::to_string(sConfig->width) +
+		",\"height\":" + std::to_string(sConfig->height) +
+		",\"fps\":" + std::to_string(sConfig->FPS) +
+		",\"bitrate_kbps\":" + std::to_string(sConfig->bitrate) +
+		",\"codec\":" + LabLogger::JsonString(SafePlatformStringToStdString(sConfig->videoCodec)));
 
 	//Thanks to https://stackoverflow.com/questions/11746146/how-to-convert-platformstring-to-char
 	std::wstring fooW(sConfig->hostname->Begin());
@@ -300,7 +337,10 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 	}
 
 	// Sleep(10000);
-	connectedInstance = this;
+	{
+		std::lock_guard<std::mutex> lock(g_connectedInstanceMutex);
+		g_connectedInstance = this;
+	}
 	CONNECTION_LISTENER_CALLBACKS callbacks;
 	LiInitializeConnectionCallbacks(&callbacks);
 	callbacks.logMessage = log_message;
@@ -314,7 +354,7 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 	callbacks.rumble = connection_rumble;
 	callbacks.rumbleTriggers = connection_trigger_rumble;
 
-	FFMpegDecoder::instance().CompleteInitialization(res, &config, sConfig->framePacing == "Immediate");
+	FFMpegDecoder::instance().CompleteInitialization(res, &config, sConfig->framePacing == "Immediate", sConfig->idrInterval);
 	DECODER_RENDERER_CALLBACKS rCallbacks = FFMpegDecoder::getDecoder();
 
 	AUDIO_RENDERER_CALLBACKS aCallbacks = AudioPlayer::getDecoder();
@@ -325,6 +365,7 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 	Utils::Log(message);
 
 	if (k != 0) {
+		LabLogger::Event("stream_start_failed", "\"status\":" + std::to_string(k));
 		this->OnFailed(0, k, "Connection failed");
 	}
 
@@ -332,6 +373,7 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 }
 
 void MoonlightClient::StopStreaming() {
+	LabLogger::Event("stream_stop_requested");
 	LiStopConnection();
 }
 
@@ -357,9 +399,16 @@ void connection_started() {
 	char message[2048];
 	sprintf(message, "Connection Started\n");
 	Utils::Log(message);
-	if (connectedInstance->OnCompleted != nullptr) {
-		connectedInstance->OnCompleted();
+	if (g_connectionTerminated.load(std::memory_order_acquire)) {
+		LabLogger::Event("connection_started_after_termination");
+		return;
 	}
+	LabLogger::Event("connection_started");
+	WithConnectedInstance([](MoonlightClient* instance) {
+		if (instance->OnCompleted != nullptr) {
+			instance->OnCompleted();
+		}
+	});
 }
 
 void connection_status_update(int status) {
@@ -367,21 +416,29 @@ void connection_status_update(int status) {
 	auto stageName = LiGetFormattedStageName(status);
 	sprintf(message, "Stage %d: '%s' - Started\n", status, LiGetFormattedStageName(status));
 	Utils::Log(message);
+	LabLogger::Event("stage_started", "\"stage\":" + std::to_string(status) +
+		",\"stage_name\":" + LabLogger::JsonString(stageName ? stageName : ""));
 }
 
 void connection_status_completed(int status) {
 	char message[4096];
 	sprintf(message, "Stage %d: '%s' - Completed\n", status, LiGetFormattedStageName(status));
 	Utils::Log(message);
-	if (connectedInstance->OnStatusUpdate != nullptr) {
-		connectedInstance->OnStatusUpdate(status);
-	}
+	LabLogger::Event("stage_completed", "\"stage\":" + std::to_string(status) +
+		",\"stage_name\":" + LabLogger::JsonString(LiGetFormattedStageName(status)));
+	WithConnectedInstance([status](MoonlightClient* instance) {
+		if (instance->OnStatusUpdate != nullptr) {
+			instance->OnStatusUpdate(status);
+		}
+	});
 }
 
 void connection_set_hdr(bool enable) {
-	if (connectedInstance->SetHDR != nullptr) {
-		connectedInstance->SetHDR(enable);
-	}
+	WithConnectedInstance([enable](MoonlightClient* instance) {
+		if (instance->SetHDR != nullptr) {
+			instance->SetHDR(enable);
+		}
+	});
 }
 
 void connection_terminated(int status) {
@@ -389,7 +446,24 @@ void connection_terminated(int status) {
 	sprintf(message, "Connection terminated with status %d\n", status);
 	Utils::Log(message);
 
+	g_lastTerminationStatus.store(status, std::memory_order_release);
 	g_connectionTerminated.store(true, std::memory_order_release);
+
+	TERMINATION_SNAPSHOT snapshot;
+	LiGetLastTerminationSnapshot(&snapshot);
+	LabLogger::Event("connection_terminated",
+		"\"status\":" + std::to_string(status) +
+		",\"origin\":" + std::to_string((int)snapshot.origin) +
+		",\"socket_error\":" + std::to_string(snapshot.socketError) +
+		",\"last_video_ms\":" + std::to_string(LabLogger::LastVideoMs()) +
+		",\"last_audio_ms\":" + std::to_string(LabLogger::LastAudioMs()) +
+		",\"last_control_ms\":" + std::to_string(LabLogger::LastControlMs()) +
+		",\"last_frame_index\":" + std::to_string(LabLogger::LastFrameNumber()) +
+		",\"bitrate_kbps\":" + std::to_string(snapshot.bitrateKbps) +
+		",\"codec\":" + std::to_string(snapshot.codec) +
+		",\"queue_depth\":" + std::to_string(FrameQueue::instance().count()) +
+		",\"source_file\":" + LabLogger::JsonString(snapshot.sourceFile ? snapshot.sourceFile : "") +
+		",\"source_line\":" + std::to_string(snapshot.sourceLine));
 }
 
 void stage_failed(int stage, int err) {
@@ -400,21 +474,30 @@ void stage_failed(int stage, int err) {
 	LiStringifyPortFlags(portFlags, ", ", failingPorts, sizeof(failingPorts));
 	sprintf(message, "Stage %d: '%s' - Failed with error: %d.\n", stage, LiGetFormattedStageName(stage), err, failingPorts);
 	Utils::Log(message);
-	if (connectedInstance->OnFailed != nullptr) {
-		connectedInstance->OnFailed(stage, err, message);
-	}
+	LabLogger::Event("stage_failed", "\"stage\":" + std::to_string(stage) +
+		",\"stage_name\":" + LabLogger::JsonString(LiGetFormattedStageName(stage)) +
+		",\"error\":" + std::to_string(err));
+	WithConnectedInstance([&](MoonlightClient* instance) {
+		if (instance->OnFailed != nullptr) {
+			instance->OnFailed(stage, err, message);
+		}
+	});
 }
 
 void connection_rumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor) {
-	if (connectedInstance->OnRumble != nullptr) {
-		connectedInstance->OnRumble(controllerNumber, lowFreqMotor, highFreqMotor);
-	}
+	WithConnectedInstance([controllerNumber, lowFreqMotor, highFreqMotor](MoonlightClient* instance) {
+		if (instance->OnRumble != nullptr) {
+			instance->OnRumble(controllerNumber, lowFreqMotor, highFreqMotor);
+		}
+	});
 }
 
 void connection_trigger_rumble(unsigned short controllerNumber, unsigned short leftTriggerMotor, unsigned short rightTriggerMotor) {
-	if (connectedInstance->OnTriggerRumble != nullptr) {
-		connectedInstance->OnTriggerRumble(controllerNumber, leftTriggerMotor, rightTriggerMotor);
-	}
+	WithConnectedInstance([controllerNumber, leftTriggerMotor, rightTriggerMotor](MoonlightClient* instance) {
+		if (instance->OnTriggerRumble != nullptr) {
+			instance->OnTriggerRumble(controllerNumber, leftTriggerMotor, rightTriggerMotor);
+		}
+	});
 }
 
 int MoonlightClient::Connect(const char *hostname) {
@@ -443,6 +526,16 @@ bool MoonlightClient::IsConnectionTerminated() {
 
 void MoonlightClient::SetConnectionTerminated() {
 	g_connectionTerminated.store(true, std::memory_order_release);
+}
+
+void MoonlightClient::SetConnectionTerminatedByUser() {
+	g_lastTerminationStatus.store(ML_ERROR_GRACEFUL_TERMINATION, std::memory_order_release);
+	LabLogger::Event("user_stop_requested");
+	g_connectionTerminated.store(true, std::memory_order_release);
+}
+
+int MoonlightClient::GetLastTerminationStatus() {
+	return g_lastTerminationStatus.load(std::memory_order_acquire);
 }
 
 bool MoonlightClient::IsHDR() {

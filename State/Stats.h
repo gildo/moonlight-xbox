@@ -3,6 +3,7 @@
 #include "pch.h"
 #include <mutex>
 #include <string>
+#include <vector>
 #include "../Common/StepTimer.h"
 #include "../Utils/FloatBuffer.h"
 
@@ -38,7 +39,28 @@ typedef struct _VIDEO_STATS {
 	uint64_t totalPreWaitTimeUs;
 	uint64_t totalRenderTimeUs;
 	uint64_t totalPresentTimeUs;
+	uint64_t totalPresentCallTimeUs;
+	uint64_t totalPresentLockWaitUs;
+	uint64_t totalPresentDxgiCallUs;
+	uint64_t totalPresentSubmitEarlyUs;
+	uint64_t totalPresentSubmitLateUs;
+	uint64_t totalPresentTargetSubmitEarlyUs;
+	uint64_t totalPresentTargetSubmitLateUs;
+	uint64_t totalPresentReturnToNextVblankUs;
 	double totalPresentDisplayMs;
+	double maxPresentDxgiCallMs;
+	double maxPresentTotalMs;
+	double maxPresentSubmitLateMs;
+	double maxPresentTargetSubmitLateMs;
+	uint32_t presentBlockedFullIntervalCount;
+	uint32_t presentSubmitLateCount;
+	uint32_t presentTargetSubmitLateCount;
+	uint32_t latePresentSkipCount;
+	uint32_t retainedFramePresentCount;
+	uint32_t sameVblankGateCount;
+	uint64_t totalSameVblankGateUs;
+	double maxSameVblankGateMs;
+	uint32_t missedPresentStreakMax;
 	uint32_t lastRtt;
 	uint32_t lastRttVariance;
 	double totalFps;
@@ -63,11 +85,32 @@ namespace moonlight_xbox_dx
 		void SubmitAvgQueueSize(float avgQueueSize);
 		void SubmitPacerTime(int64_t pacerTimeQpc);
 		void SubmitPresentPacing(double presentDisplayMs);
-		void SubmitRenderStats(double preWaitTimeMs, double renderTimeMs, double presentTimeMs, bool hitDeadline);
+		void SubmitRenderStats(double preWaitTimeMs,
+		                       double renderTimeMs,
+		                       double waitBeforePresentMs,
+		                       double presentLockWaitMs,
+		                       double presentDxgiCallMs,
+		                       double presentTotalMs,
+		                       double presentSubmitEarlyMs,
+		                       double presentSubmitLateMs,
+		                       double presentTargetSubmitEarlyMs,
+		                       double presentTargetSubmitLateMs,
+		                       double presentReturnToNextVblankMs,
+		                       double sameVblankGateMs,
+		                       bool sameVblankGated,
+		                       bool hitDeadline,
+		                       bool skippedLatePresent,
+		                       bool retainedFramePresented);
 
 	private:
 		void addVideoStats(DX::StepTimer const& timer, VIDEO_STATS& src, VIDEO_STATS& dst);
-		void formatVideoStats(DX::StepTimer const& timer, VIDEO_STATS& stats, char* output, size_t length);
+		void formatVideoStats(DX::StepTimer const& timer,
+		                      VIDEO_STATS& stats,
+		                      char* output,
+		                      size_t length,
+		                      float avgQueueSize,
+		                      double avgVideoMbps,
+		                      double peakVideoMbps);
 
 		std::mutex                           m_mutex;
 
@@ -78,5 +121,12 @@ namespace moonlight_xbox_dx
 		BandwidthTracker                     m_bwTracker;
 		float                                m_avgQueueSize;
 		double                               m_avgMbpsSmoothed;
+		uint32_t                            m_activeMissedPresentStreak;
+		std::vector<double>                  m_presentDxgiCallWindow;
+		std::vector<double>                  m_presentTotalWindow;
+		std::vector<double>                  m_presentSubmitEarlyWindow;
+		std::vector<double>                  m_presentSubmitLateWindow;
+		std::vector<double>                  m_presentTargetSubmitEarlyWindow;
+		std::vector<double>                  m_presentTargetSubmitLateWindow;
 	};
 }

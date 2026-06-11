@@ -107,6 +107,12 @@ int FrameCadence::decideAdvanceCount() {
 	return advanceCount;
 }
 
+void FrameCadence::deferAdvanceCount(int count) {
+	if (count > 0) {
+		m_phase += static_cast<double>(count);
+	}
+}
+
 // Accessors
 
 double FrameCadence::displayHz() const {

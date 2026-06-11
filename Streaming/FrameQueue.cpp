@@ -2,6 +2,7 @@
 #include "pch.h"
 // clang-format on
 #include "FrameQueue.h"
+#include "LabPacingConfig.h"
 #include "Utils.hpp"
 #include <algorithm>
 #include <cassert>
@@ -25,7 +26,7 @@ FrameQueue::FrameQueue()
       _tail(0),
       _count(0),
       _droppedLast(false),
-      _maxCapacity(5), // should not exceed swapchain BufferCount
+      _maxCapacity(LabPacingConfig::SwapChainBufferCount()), // should not exceed swapchain BufferCount
       _highWaterMark(3),
       _paused(true) {    // caller will call start()
 
@@ -196,18 +197,9 @@ void FrameQueue::waitForEnqueue(int num, double timeoutMs) {
 	auto deadline = std::chrono::steady_clock::now() +
 	                std::chrono::microseconds(static_cast<long long>(timeoutMs * 1000.0));
 
-	while (_count < num && !_paused.load(std::memory_order_acquire)) {
-		auto now = std::chrono::steady_clock::now();
-		if (now >= deadline) break;
-
-		// wait_for overshoots a lot, so wait in small chunks
-		auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now);
-		auto chunk = remaining / 4;
-		if (chunk > std::chrono::microseconds(1000)) chunk = std::chrono::microseconds(1000);
-		if (chunk < std::chrono::microseconds(250))  chunk = std::chrono::microseconds(250);
-
-		_cv.wait_for(lock, chunk);
-	}
+	_cv.wait_until(lock, deadline, [&]() {
+		return _count >= num || _paused.load(std::memory_order_acquire);
+	});
 }
 
 AVFrame* FrameQueue::dequeue() {

@@ -24,13 +24,14 @@ namespace moonlight_xbox_dx {
         ScreenResolution^ resolution;
         int fps = 60;
         int autostartID = -1;
-        Platform::String^ videoCodec = "H.265";
+        Platform::String^ videoCodec = "H.264";
         Platform::String^ audioConfig = "Stereo";
         Platform::String^ framePacing = "";
         bool enableHDR = false;
         bool enableSOPS = false;
         bool enableStats = false;
         bool enableGraphs = true;
+	    int idrInterval = 0;
         Windows::Foundation::Collections::IVector<MoonlightApp^>^ apps;
     public:
         //Thanks to https://phsucharee.wordpress.com/2013/06/19/data-binding-and-ccx-inotifypropertychanged/
@@ -284,5 +285,14 @@ namespace moonlight_xbox_dx {
                 OnPropertyChanged("EnableGraphs");
             }
         }
+
+        property int IdrInterval 
+        {
+		    int get() { return this->idrInterval; }
+		    void set(int value) {
+			    this->idrInterval = (value <= 0) ? 0 : (value < 2 ? 2 : value);
+			    OnPropertyChanged("IdrInterval");
+		    }
+	    }
     };
 }

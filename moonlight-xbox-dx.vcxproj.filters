@@ -39,6 +39,9 @@
     <ClCompile Include="State\MoonlightClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="State\LabLogger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="State\StreamConfiguration.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -378,6 +381,9 @@
     <ClCompile Include="Streaming\FrameQueue.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Streaming\LabPacingConfig.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Streaming\FrameCadence.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -387,6 +393,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="State\MoonlightClient.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="State\LabLogger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="State\StreamConfiguration.h">
@@ -474,6 +483,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Streaming\FrameQueue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Streaming\LabPacingConfig.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Streaming\FrameCadence.h">
@@ -683,6 +695,7 @@
     </None>
     <None Include="Assets\Shader\d3d11_vertex.fxc" />
     <None Include="Assets\Shader\d3d11_yuv420_pixel.fxc" />
+    <None Include="Assets\Shader\d3d11_yuv420_pixel_array.fxc" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="Pages\AppPage.xaml" />

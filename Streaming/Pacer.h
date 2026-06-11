@@ -21,9 +21,13 @@ class Pacer {
 	void deinit();
 	void init(const std::shared_ptr<DX::DeviceResources> &res, int maxVideoFps, double refreshRate, bool framePacingImmediate);
 	bool getPacingImmediate();
+	double getConfiguredRefreshRate() const;
+	double getObservedDisplayHz();
+	double getObservedStreamFps();
 	void setPacingImmediate(bool framePacingImmediate);
 	void waitForFrame(double timeoutMs);
-	bool renderOnMainThread(std::shared_ptr<moonlight_xbox_dx::VideoRenderer> &sceneRenderer);
+	bool renderOnMainThread(std::shared_ptr<moonlight_xbox_dx::VideoRenderer> &sceneRenderer, int64_t retainedFallbackTargetQpc = 0);
+	bool lastRenderUsedRetained() const { return m_LastRenderUsedRetained; }
 	bool waitBeforePresent(int64_t deadline);
 	int64_t getCurrentFramePts();
 	int64_t getNextVBlankQpc(int64_t *now);
@@ -43,7 +47,7 @@ class Pacer {
 	}
 
 	bool renderModeImmediate(std::shared_ptr<moonlight_xbox_dx::VideoRenderer> &sceneRenderer);
-	bool renderModeDisplayLocked(std::shared_ptr<moonlight_xbox_dx::VideoRenderer> &sceneRenderer);
+	bool renderModeDisplayLocked(std::shared_ptr<moonlight_xbox_dx::VideoRenderer> &sceneRenderer, int64_t retainedFallbackTargetQpc);
 	void vsyncHardware();
 	void updateFrameStats();
 
@@ -57,6 +61,7 @@ class Pacer {
 
 	FrameCadence m_FrameCadence;
 	AVFrame* m_CurrentFrame = nullptr;
+	bool m_LastRenderUsedRetained = false;
 
 	static constexpr int VSYNC_HISTORY_SIZE = 512;
 	std::mutex m_FrameStatsLock;

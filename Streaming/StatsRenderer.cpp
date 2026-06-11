@@ -28,11 +28,11 @@ void StatsRenderer::Update(DX::StepTimer const &timer) {
 	// We let the Stats class always process even if not visible. Most of the time
 	// it will simply accumulate stats during its 1-second window period. Each second,
 	// when it determines the user-visible text should be updated, it will update outputStr and return true.
-	char outputStr[1024]; // char is used so we can share more of the formatting code with moonlight-qt
-	wchar_t wideStr[2048];
+	char outputStr[2048]; // char is used so we can share more of the formatting code with moonlight-qt
+	wchar_t wideStr[4096];
 
 	if (m_stats->ShouldUpdateDisplay(timer, m_visible, outputStr, sizeof(outputStr))) {
-		size_t numChars = mbstowcs(wideStr, outputStr, 1024);
+		size_t numChars = mbstowcs(wideStr, outputStr, 2048);
 		if (numChars != -1) {
 			m_console->Clear();
 			m_console->Write(wideStr);
@@ -187,17 +187,17 @@ void StatsRenderer::CreateWindowSizeDependentResources() {
 	int right = m_displayWidth / 3;
 	int bottom = 0;
 
-	// 13 lines of text
+	// Lab diagnostics add a few lines over the stock stats overlay.
 	if (m_displayHeight >= 2160) { // 24pt font
 		left = 20;
 		right = m_displayWidth / 2;
-		bottom = 448;
+		bottom = 560;
 	} else if (m_displayHeight >= 1440) { // 12pt font
 		left = 14;
-		bottom = 224;
+		bottom = 280;
 	} else {
 		left = 10;
-		bottom = 224;
+		bottom = 280;
 	}
 
 #if defined(_DEBUG)
