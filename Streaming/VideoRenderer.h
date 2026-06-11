@@ -62,7 +62,7 @@ namespace moonlight_xbox_dx
 		const std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>*
 			getDirectSampleSrvs(ID3D11Texture2D* texture, UINT slice, const D3D11_TEXTURE2D_DESC& desc);
 		void setupVertexBuffer(D3D11_TEXTURE2D_DESC frameDesc);
-		bool drawVideoTexture(UINT srvIndex);
+		bool drawVideoTexture(UINT srvIndex, const std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, 2>* directSrvs = nullptr);
 		void getFramePremultipliedCscConstants(const AVFrame* frame, std::array<float, 9> &cscMatrix, std::array<float, 3> &offsets);
 		void getFrameChromaCositingOffsets(const AVFrame* frame, std::array<float, 2> &chromaOffsets);
 		bool hasFrameFormatChanged(const AVFrame* frame);

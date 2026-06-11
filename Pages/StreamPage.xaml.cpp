@@ -80,7 +80,7 @@ void StreamPage::Page_Loaded(Platform::Object ^ sender, Windows::UI::Xaml::Route
 	}
 
 	Platform::WeakReference weakThis(this);
-	DISPATCH_UI([weakThis, generation] {
+	DISPATCH_UI([=]() {
 		auto that = weakThis.Resolve<StreamPage>();
 		if (that == nullptr) return;
 		if (that->m_loadGeneration != generation) {
